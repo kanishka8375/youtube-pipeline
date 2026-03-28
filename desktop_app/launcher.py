@@ -184,14 +184,39 @@ class APIHandler(BaseHTTPRequestHandler):
         return videos
     
     def open_file(self, path):
+        """Open file with path validation to prevent traversal attacks."""
         import platform
-        system = platform.system()
-        if system == 'Darwin':
-            subprocess.run(['open', path])
-        elif system == 'Windows':
-            os.startfile(path)
-        else:
-            subprocess.run(['xdg-open', path])
+        from pathlib import Path
+        
+        # Resolve to absolute path and validate it's within output directory
+        try:
+            requested_path = Path(path).resolve()
+            output_dir = Path("output").resolve()
+            temp_dir = Path("temp").resolve()
+            
+            # Check path is within allowed directories
+            is_in_output = str(requested_path).startswith(str(output_dir))
+            is_in_temp = str(requested_path).startswith(str(temp_dir))
+            
+            if not (is_in_output or is_in_temp):
+                print(f"Path traversal blocked: {path}")
+                return {"error": "Invalid path"}
+            
+            if not requested_path.exists():
+                print(f"File not found: {path}")
+                return {"error": "File not found"}
+            
+            system = platform.system()
+            if system == 'Darwin':
+                subprocess.run(['open', str(requested_path)])
+            elif system == 'Windows':
+                os.startfile(str(requested_path))
+            else:
+                subprocess.run(['xdg-open', str(requested_path)])
+            return {"success": True}
+        except Exception as e:
+            print(f"Error opening file: {e}")
+            return {"error": str(e)}
     
     def send_json(self, data):
         self.send_response(200)
