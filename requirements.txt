@@ -1,0 +1,18 @@
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+google-generativeai>=0.7.0
+moviepy>=1.0.3
+Pillow>=10.0.0
+edge-tts>=6.1.0
+python-dotenv>=1.0.0
+pydub>=0.25.1
+requests>=2.31.0
+flask>=3.0.0
+flask-cors>=4.0.0
+numpy>=1.24.0
+
+# Core dependencies for sync engine (all included above):
+# - pydub: Audio timing and sync
+# - numpy: Frame calculations
+# - moviepy: Video frame accuracy
