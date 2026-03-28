@@ -183,10 +183,11 @@ class YouTubePipeline:
         music_file = random.choice(music_files)
         print(f"  Adding music: {music_file.name}")
         
-        from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
+        from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip
         
         video = VideoFileClip(str(video_path))
-        music = AudioFileClip(str(music_file)).volumex(0.3)  # 30% volume
+        music = AudioFileClip(str(music_file))
+        music = music.with_volume_scaled(0.3)  # 30% volume
         
         # Loop if needed
         if music.duration < video.duration:
