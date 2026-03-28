@@ -2,6 +2,7 @@
 
 import json
 from typing import Dict, List, Optional
+import requests
 
 from llm_providers import BaseLLMProvider, LLMProviderFactory
 
@@ -20,7 +21,39 @@ class ContentGenerator:
         if provider:
             self.provider = provider
         else:
-            self.provider = LLMProviderFactory.create(provider_name)
+            self.provider = self._create_provider_with_fallback(provider_name)
+    
+    def _create_provider_with_fallback(self, provider_name: Optional[str]) -> BaseLLMProvider:
+        """Create provider with automatic fallback on failure."""
+        # Try requested provider first
+        if provider_name and provider_name != "auto":
+            try:
+                provider = LLMProviderFactory.create(provider_name)
+                # Test connection
+                provider.generate("test", max_tokens=1)
+                print(f"Using provider: {provider_name}")
+                return provider
+            except Exception as e:
+                print(f"{provider_name} failed: {e}")
+        
+        # Try providers in order of preference
+        providers_to_try = ["ollama", "groq", "gemini"]
+        
+        for name in providers_to_try:
+            try:
+                provider = LLMProviderFactory.create(name)
+                # Test with a minimal request
+                provider.generate("hi", max_tokens=1)
+                print(f"Auto-selected provider: {name}")
+                return provider
+            except Exception as e:
+                print(f"  {name} not available: {e}")
+                continue
+        
+        raise RuntimeError("No LLM provider available. Options:\n"
+                          "- Install Ollama: https://ollama.com\n"
+                          "- Set GROQ_API_KEY for Groq\n"
+                          "- Set GEMINI_API_KEY for Gemini")
     
     def generate_script(self, topic: str, duration_seconds: int = 60, style: str = "educational") -> Dict:
         """Generate a video script with segments for the given topic."""
