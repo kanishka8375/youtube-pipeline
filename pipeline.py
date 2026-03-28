@@ -6,6 +6,7 @@ import asyncio
 import json
 import random
 import argparse
+import time
 from pathlib import Path
 from typing import Optional, List
 
@@ -114,7 +115,9 @@ class YouTubePipeline:
         
         # Step 4: Assemble video
         print("\n[4/4] Assembling video...")
-        video_path = self.output_dir / f"{self._sanitize_filename(content['title'])}.mp4"
+        # Add timestamp to prevent filename collisions
+        timestamp = int(time.time())
+        video_path = self.output_dir / f"{self._sanitize_filename(content['title'])}_{timestamp}.mp4"
         
         self.video_asm.assemble_video(
             segments=content['segments'],
@@ -129,7 +132,7 @@ class YouTubePipeline:
             video_path = self._add_background_music(video_path)
         
         # Create thumbnail
-        thumb_path = self.output_dir / f"{self._sanitize_filename(content['title'])}_thumb.jpg"
+        thumb_path = self.output_dir / f"{self._sanitize_filename(content['title'])}_{timestamp}_thumb.jpg"
         self.video_asm.create_thumbnail(
             title=content['title'],
             output_path=str(thumb_path)
