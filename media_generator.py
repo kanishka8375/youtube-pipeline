@@ -11,6 +11,44 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 
+def _get_system_font():
+    """Get a system font path that works across platforms."""
+    import platform
+    import os
+    
+    # Common font paths by platform
+    font_paths = []
+    
+    if platform.system() == "Linux":
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        ]
+    elif platform.system() == "Darwin":  # macOS
+        font_paths = [
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+        ]
+    elif platform.system() == "Windows":
+        font_paths = [
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/Arial.ttf",
+            "C:/Windows/Fonts/segoeui.ttf",
+        ]
+    
+    # Find first available font
+    for path in font_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None  # Will fall back to default
+
+
+
+
 class MediaGenerator:
     """Generates audio and visual media for videos."""
     
@@ -68,8 +106,12 @@ class MediaGenerator:
         img = Image.new('RGB', (width, height), bg_color)
         draw = ImageDraw.Draw(img)
         
+        font_path = _get_system_font()
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
+            if font_path:
+                font = ImageFont.truetype(font_path, 80)
+            else:
+                font = ImageFont.load_default()
         except:
             font = ImageFont.load_default()
         
