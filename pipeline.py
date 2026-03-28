@@ -225,8 +225,17 @@ class YouTubePipeline:
         return output_path
     
     def _sanitize_filename(self, filename: str) -> str:
-        """Create safe filename."""
+        """Create safe filename, prevent path traversal."""
         import re
+        if not filename:
+            return "video"
+        
+        # Remove path traversal attempts
+        filename = filename.replace('..', '')
+        filename = filename.replace('/', '')
+        filename = filename.replace('\\', '')
+        
+        # Remove other unsafe characters
         safe = re.sub(r'[^\w\s-]', '', filename).strip().lower()
         safe = re.sub(r'[-\s]+', '-', safe)
         return safe[:50] or "video"
