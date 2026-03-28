@@ -23,6 +23,7 @@ class VideoAssembler:
         self.size = (1920, 1080)
         self.fps = 30
         self.theme = get_theme(theme)
+        self._gradient_cache = {}  # Cache gradients by color tuple
     
     def set_theme(self, theme_name: str):
         """Change the visual theme."""
