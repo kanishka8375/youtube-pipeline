@@ -2,7 +2,8 @@
 
 import time
 import random
-import requests
+import asyncio
+import aiohttp
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -63,33 +64,67 @@ class FreeImageGenerator:
             print(f"Image generation failed: {e}")
             return None
     
-    def generate_images_for_script(self, segments: List[Dict]) -> List[Optional[str]]:
-        """Generate images for each content segment."""
-        image_paths = []
+    async def _download_single_image(self, session: aiohttp.ClientSession, 
+                                      prompt: str, output_path: Path) -> Optional[str]:
+        """Download single image using aiohttp."""
+        try:
+            encoded_prompt = requests.utils.quote(prompt)
+            seed = random.randint(1, 1000000)
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
+            
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as response:
+                if response.status == 200:
+                    content = await response.read()
+                    with open(output_path, "wb") as f:
+                        f.write(content)
+                    return str(output_path)
+        except Exception as e:
+            print(f"  Image download failed: {e}")
+        return None
+
+    async def generate_images_for_script(self, segments: List[Dict]) -> List[Optional[str]]:
+        """Generate images for each content segment (concurrent)."""
+        # Create all tasks first
+        tasks = []
+        indices = []
         
+        async with aiohttp.ClientSession() as session:
+            for i, segment in enumerate(segments):
+                seg_type = segment.get("type", "content")
+                
+                if seg_type != "content":
+                    tasks.append(None)  # Placeholder for non-content
+                    continue
+                
+                visual = segment.get("visual_suggestion", "")
+                text = segment.get("text", "")
+                
+                # Enhance prompt
+                prompt = visual or text[:100]
+                prompt = f"{prompt}, high quality, detailed, illustration"
+                
+                output_path = self.output_dir / f"segment_{i:03d}.png"
+                task = self._download_single_image(session, prompt, output_path)
+                tasks.append(task)
+                indices.append(i)
+            
+            # Execute all downloads concurrently
+            results = await asyncio.gather(*[t for t in tasks if t is not None])
+        
+        # Build final list with None for non-content segments
+        image_paths = []
+        result_idx = 0
         for i, segment in enumerate(segments):
-            seg_type = segment.get("type", "content")
-            
-            if seg_type != "content":
+            if segment.get("type", "content") != "content":
                 image_paths.append(None)
-                continue
-            
-            visual = segment.get("visual_suggestion", "")
-            text = segment.get("text", "")
-            
-            # Enhance prompt
-            prompt = visual or text[:100]
-            prompt = f"{prompt}, high quality, detailed, illustration"
-            
-            output_path = self.output_dir / f"segment_{i:03d}.png"
-            img_path = self.generate_image(prompt, str(output_path))
-            
-            if img_path:
-                print(f"  Scene {i}: Image generated")
             else:
-                print(f"  Scene {i}: No image (continuing)")
-            
-            image_paths.append(img_path)
+                img_path = results[result_idx] if result_idx < len(results) else None
+                result_idx += 1
+                if img_path:
+                    print(f"  Scene {i}: Image generated")
+                else:
+                    print(f"  Scene {i}: No image (continuing)")
+                image_paths.append(img_path)
         
         return image_paths
 
