@@ -88,9 +88,10 @@ Rules:
             json_mode=True
         )
         
-        # Handle empty response
-        if not response.content or not response.content.strip():
-            print("Warning: Empty response from LLM, using fallback script")
+        # Handle empty/None response - critical to avoid JSON decode error
+        content_raw = getattr(response, 'content', None)
+        if not content_raw or not str(content_raw).strip():
+            print("Warning: Empty/None response from LLM, using fallback script")
             return self._create_fallback_script(topic, duration_seconds)
         
         # Clean up response - remove markdown code blocks if present
@@ -117,7 +118,8 @@ Rules:
                 json_mode=True
             )
             
-            if not response.content or not response.content.strip():
+            content_raw = getattr(response, 'content', None)
+            if not content_raw or not str(content_raw).strip():
                 return self._create_fallback_script(topic, duration_seconds)
             
             content = response.content.strip()
