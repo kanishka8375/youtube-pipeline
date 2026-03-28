@@ -66,6 +66,9 @@ class YouTubePipeline:
         theme = theme or self.theme
         self.video_asm.set_theme(theme)
         
+        # Calculate total steps for progress reporting
+        total_steps = 5 if upload else 4
+        
         print(f"\n{'='*60}")
         print(f"Creating: {topic}")
         print(f"{'='*60}\n")
