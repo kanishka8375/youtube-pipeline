@@ -44,24 +44,31 @@ class OllamaProvider(BaseLLMProvider):
         self.model = model or self._auto_detect_model()
     
     def _auto_detect_model(self) -> str:
-        """Auto-detect available model from Ollama."""
+        """Auto-detect available model from Ollama and show all models."""
         try:
             response = requests.get(f"{self.base_url}/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get("models", [])
                 if models:
-                    # Prefer common models, otherwise use first available
+                    # Print all available models
+                    print("\nAvailable Ollama models:")
+                    model_names = []
+                    for m in models:
+                        name = m.get("name", m.get("model", "unknown"))
+                        model_names.append(name)
+                        print(f"  - {name}")
+                    
+                    # Prefer common models
                     preferred = ["qwen3.5", "qwen2.5", "llama3.2", "llama3.1", "mistral", "phi3"]
                     for model_name in preferred:
-                        for m in models:
-                            name = m.get("name", m.get("model", ""))
+                        for name in model_names:
                             if model_name in name.lower():
-                                print(f"Auto-detected model: {name}")
+                                print(f"\nSelected: {name}")
                                 return name
+                    
                     # Fallback to first available
-                    first_model = models[0].get("name", models[0].get("model", "llama3.2"))
-                    print(f"Auto-detected model: {first_model}")
-                    return first_model
+                    print(f"\nSelected: {model_names[0]}")
+                    return model_names[0]
         except Exception as e:
             print(f"Model detection failed: {e}")
         return "llama3.2"
