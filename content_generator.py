@@ -88,18 +88,84 @@ Rules:
             json_mode=True
         )
         
+        # Handle empty response
+        if not response.content or not response.content.strip():
+            print("Warning: Empty response from LLM, using fallback script")
+            return self._create_fallback_script(topic, duration_seconds)
+        
+        # Clean up response - remove markdown code blocks if present
+        content = response.content.strip()
+        if content.startswith('```'):
+            # Extract content from markdown code block
+            lines = content.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].startswith('```'):
+                lines = lines[:-1]
+            content = '\n'.join(lines).strip()
+        
         try:
-            return json.loads(response.content)
+            return json.loads(content)
         except json.JSONDecodeError as e:
+            print(f"JSON parse error: {e}")
+            print(f"Response content: {content[:200]}...")
+            
             # Retry with explicit JSON-only instruction
-            print(f"JSON parse error, retrying... {e}")
             response = self.provider.generate(
                 prompt=prompt + "\n\nCRITICAL: Return ONLY raw JSON. No markdown, no explanations.",
                 system_prompt="You are an expert YouTube content creator. Output valid JSON only.",
                 json_mode=True
             )
-            return json.loads(response.content)
+            
+            if not response.content or not response.content.strip():
+                return self._create_fallback_script(topic, duration_seconds)
+            
+            content = response.content.strip()
+            if content.startswith('```'):
+                lines = content.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith('```'):
+                    lines = lines[:-1]
+                content = '\n'.join(lines).strip()
+            
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                print("Retry failed, using fallback script")
+                return self._create_fallback_script(topic, duration_seconds)
     
+
+    def _create_fallback_script(self, topic: str, duration_seconds: int) -> Dict:
+        """Create a basic fallback script when LLM fails."""
+        words = duration_seconds // 2
+        
+        return {
+            "title": f"Everything You Need to Know About {topic}",
+            "description": f"Learn all about {topic} in this informative video. We cover the key facts and information you need to know.",
+            "tags": [topic.lower().replace(" ", ""), "education", "facts", "information", "learn"],
+            "segments": [
+                {
+                    "type": "intro",
+                    "text": f"Welcome! Today we're exploring {topic}. This is a fascinating subject that everyone should know about.",
+                    "duration": max(5, duration_seconds // 5),
+                    "visual_suggestion": f"Title card showing {topic}"
+                },
+                {
+                    "type": "content",
+                    "text": f"{topic} is an interesting and important topic. It has many aspects worth learning about. [PAUSE] Understanding {topic} can help you in many ways.",
+                    "duration": max(10, duration_seconds * 3 // 5),
+                    "visual_suggestion": f"Illustration of {topic}"
+                },
+                {
+                    "type": "outro",
+                    "text": "Thanks for watching! If you enjoyed this video, please like and subscribe for more content. Leave a comment below with your thoughts!",
+                    "duration": max(5, duration_seconds // 5),
+                    "visual_suggestion": "Call to action screen"
+                }
+            ]
+        }
+
     def generate_thumbnail_ideas(self, title: str, script: str) -> List[str]:
         """Generate thumbnail text and concept ideas."""
         prompt = f"""Generate 3 thumbnail concepts for a YouTube video.
