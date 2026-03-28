@@ -10,18 +10,42 @@ import json
 import uuid
 import subprocess
 import threading
-import webbrowser
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import time
+
+# Detect if we're in a virtual environment
+def get_venv_python():
+    """Get the correct Python executable (venv if active)."""
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        # In a venv, use current executable
+        return sys.executable
+    return sys.executable
+
+def get_venv_pip():
+    """Get the correct pip executable."""
+    python = get_venv_python()
+    return [python, "-m", "pip"]
+
+VENV_PYTHON = get_venv_python()
 
 # Try to import webview
 try:
     import webview
 except ImportError:
-    print("Installing pywebview...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pywebview", "-q"])
-    import webview
+    print("pywebview not found. Installing...")
+    try:
+        subprocess.check_call(get_venv_pip() + ["install", "pywebview"], 
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import webview
+        print("pywebview installed successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to install pywebview: {e}")
+        print("\nPlease install manually:")
+        print(f"  {VENV_PYTHON} -m pip install pywebview")
+        print("\nOr if using system packages:")
+        print("  sudo apt install python3-webview")
+        sys.exit(1)
 
 PROJECT_ROOT = Path(__file__).parent.parent
 jobs = {}
@@ -101,7 +125,7 @@ class APIHandler(BaseHTTPRequestHandler):
         
         def run():
             args = [
-                sys.executable, str(PROJECT_ROOT / 'pipeline.py'),
+                VENV_PYTHON, str(PROJECT_ROOT / 'pipeline.py'),
                 '--topic', data['topic'],
                 '--duration', str(data['duration']),
                 '--style', data['style'],
