@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+        }
+        
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .progress {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        .progress.active {
+            display: block;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+            width: 0%;
+        }
+        
+        .progress-text {
+            text-align: center;
+            margin-top: 10px;
+            color: #666;
+        }
+        
+        .result {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .result.active {
+            display: block;
+        }
+        
+        .result.success {
+            border-left: 4px solid #28a745;
+        }
+        
+        .result.error {
+            border-left: 4px solid #dc3545;
+        }
+        
+        .videos-section {
+            margin-top: 30px;
+        }
+        
+        .videos-section h2 {
+            color: white;
+            margin-bottom: 15px;
+        }
+        
+        .video-list {
+            display: grid;
+            gap: 15px;
+        }
+        
+        .video-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .video-item a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .video-item a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Video Generator</h1>
+        
+        <div class="card">
+            <form id="generateForm">
+                <div class="form-group">
+                    <label for="topic">Video Topic *</label>
+                    <input type="text" id="topic" name="topic" placeholder="e.g., Space Facts" required>
+                </div>
+                
+                <div class="row">
+                    <div class="form-group">
+                        <label for="duration">Duration (seconds)</label>
+                        <input type="number" id="duration" name="duration" value="60" min="30" max="300">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="theme">Visual Theme</label>
+                        <select id="theme" name="theme">
+                            <option value="modern">Modern</option>
+                            <option value="minimal">Minimal</option>
+                            <option value="vibrant">Vibrant</option>
+                            <option value="corporate">Corporate</option>
+                            <option value="cinematic">Cinematic</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Options</label>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="music" name="music" checked>
+                            <label for="music">Background Music</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="images" name="images" checked>
+                            <label for="images">AI Images</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="upload" name="upload">
+                            <label for="upload">Upload to YouTube</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" id="submitBtn">Generate Video</button>
+            </form>
+            
+            <div class="progress" id="progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Starting...</div>
+            </div>
+            
+            <div class="result" id="result">
+                <div id="resultContent"></div>
+            </div>
+        </div>
+        
+        <div class="videos-section">
+            <h2>Generated Videos</h2>
+            <div class="video-list" id="videoList"></div>
+        </div>
+    </div>
+    
+    <script>
+        let jobId = null;
+        let pollInterval = null;
+        
+        // Load existing videos
+        async function loadVideos() {
+            try {
+                const res = await fetch('/api/videos');
+                const videos = await res.json();
+                
+                const list = document.getElementById('videoList');
+                if (videos.length === 0) {
+                    list.innerHTML = '<p style="color: white;">No videos yet</p>';
+                    return;
+                }
+                
+                list.innerHTML = videos.map(v => `
+                    <div class="video-item">
+                        <span>${v.name}</span>
+                        <a href="/output/${v.name}" download>Download</a>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load videos:', e);
+            }
+        }
+        
+        // Poll job status
+        async function pollStatus() {
+            if (!jobId) return;
+            
+            try {
+                const res = await fetch(`/api/status/${jobId}`);
+                const data = await res.json();
+                
+                const progress = document.getElementById('progress');
+                const fill = document.getElementById('progressFill');
+                const text = document.getElementById('progressText');
+                const result = document.getElementById('result');
+                const resultContent = document.getElementById('resultContent');
+                
+                progress.classList.add('active');
+                fill.style.width = `${data.progress || 0}%`;
+                
+                if (data.status === 'generating') {
+                    text.textContent = 'Generating video...';
+                } else if (data.status === 'complete') {
+                    text.textContent = 'Complete!';
+                    progress.classList.remove('active');
+                    result.classList.add('active', 'success');
+                    resultContent.innerHTML = `
+                        <h3>Video Generated!</h3>
+                        <p><strong>${data.result.title}</strong></p>
+                        <p>Video: ${data.result.video_path}</p>
+                        ${data.result.video_url ? `<p><a href="${data.result.video_url}" target="_blank">View on YouTube</a></p>` : ''}
+                    `;
+                    document.getElementById('submitBtn').disabled = false;
+                    document.getElementById('submitBtn').textContent = 'Generate Video';
+                    clearInterval(pollInterval);
+                    loadVideos();
+                } else if (data.status === 'error') {
+                    text.textContent = 'Error';
+                    progress.classList.remove('active');
+                    result.classList.add('active', 'error');
+                    resultContent.innerHTML = `<p><strong>Error:</strong> ${data.error}</p>`;
+                    document.getElementById('submitBtn').disabled = false;
+                    document.getElementById('submitBtn').textContent = 'Generate Video';
+                    clearInterval(pollInterval);
+                }
+            } catch (e) {
+                console.error('Poll error:', e);
+            }
+        }
+        
+        // Form submit
+        document.getElementById('generateForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+            
+            document.getElementById('result').classList.remove('active', 'success', 'error');
+            
+            const formData = {
+                topic: document.getElementById('topic').value,
+                duration: parseInt(document.getElementById('duration').value),
+                theme: document.getElementById('theme').value,
+                music: document.getElementById('music').checked,
+                images: document.getElementById('images').checked,
+                upload: document.getElementById('upload').checked
+            };
+            
+            try {
+                const res = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await res.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                jobId = data.job_id;
+                pollInterval = setInterval(pollStatus, 1000);
+            } catch (e) {
+                alert('Error: ' + e.message);
+                btn.disabled = false;
+                btn.textContent = 'Generate Video';
+            }
+        });
+        
+        // Initial load
+        loadVideos();
+    </script>
+</body>
+</html>
