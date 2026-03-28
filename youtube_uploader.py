@@ -1,7 +1,7 @@
 """YouTube upload module for video publishing."""
 
 import os
-import pickle
+import json
 from pathlib import Path
 from typing import Optional, List
 
@@ -19,18 +19,49 @@ class YouTubeUploader:
     """Uploads videos to YouTube channel."""
     
     def __init__(self, client_secrets: str = "client_secrets.json",
-                 credentials_path: str = "youtube_credentials.pkl"):
+                 credentials_path: str = "youtube_credentials.json"):
         self.client_secrets = client_secrets
         self.credentials_path = credentials_path
         self.service = None
     
+    def _load_credentials(self) -> Optional[Credentials]:
+        """Load credentials from JSON file."""
+        if not os.path.exists(self.credentials_path):
+            return None
+        
+        try:
+            with open(self.credentials_path, 'r') as f:
+                creds_data = json.load(f)
+            
+            return Credentials(
+                token=creds_data.get('token'),
+                refresh_token=creds_data.get('refresh_token'),
+                token_uri=creds_data.get('token_uri'),
+                client_id=creds_data.get('client_id'),
+                client_secret=creds_data.get('client_secret'),
+                scopes=creds_data.get('scopes')
+            )
+        except Exception as e:
+            print(f"Error loading credentials: {e}")
+            return None
+    
+    def _save_credentials(self, creds: Credentials):
+        """Save credentials to JSON file."""
+        creds_data = {
+            'token': creds.token,
+            'refresh_token': creds.refresh_token,
+            'token_uri': creds.token_uri,
+            'client_id': creds.client_id,
+            'client_secret': creds.client_secret,
+            'scopes': creds.scopes
+        }
+        
+        with open(self.credentials_path, 'w') as f:
+            json.dump(creds_data, f, indent=2)
+    
     def authenticate(self) -> bool:
         """Authenticate with YouTube API."""
-        creds = None
-        
-        if os.path.exists(self.credentials_path):
-            with open(self.credentials_path, 'rb') as f:
-                creds = pickle.load(f)
+        creds = self._load_credentials()
         
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
@@ -45,8 +76,7 @@ class YouTubeUploader:
                     self.client_secrets, SCOPES)
                 creds = flow.run_local_server(port=8080)
             
-            with open(self.credentials_path, 'wb') as f:
-                pickle.dump(creds, f)
+            self._save_credentials(creds)
         
         self.service = build("youtube", "v3", credentials=creds)
         return True

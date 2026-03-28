@@ -6,13 +6,10 @@ moviepy>=1.0.3
 Pillow>=10.0.0
 edge-tts>=6.1.0
 python-dotenv>=1.0.0
-pydub>=0.25.1
 requests>=2.31.0
-flask>=3.0.0
-flask-cors>=4.0.0
+aiohttp>=3.8.0
+groq>=0.4.0
+ollama>=0.1.0
+imageio-ffmpeg>=0.4.0
 numpy>=1.24.0
-
-# Core dependencies for sync engine (all included above):
-# - pydub: Audio timing and sync
-# - numpy: Frame calculations
-# - moviepy: Video frame accuracy
+proglog>=0.1.10
