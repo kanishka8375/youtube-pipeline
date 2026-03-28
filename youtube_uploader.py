@@ -46,7 +46,11 @@ class YouTubeUploader:
             return None
     
     def _save_credentials(self, creds: Credentials):
-        """Save credentials to JSON file."""
+        """Save credentials to JSON file with validation."""
+        # Validate required fields
+        if not creds.refresh_token:
+            print("Warning: No refresh token available. Credentials may expire.")
+        
         creds_data = {
             'token': creds.token,
             'refresh_token': creds.refresh_token,
@@ -56,8 +60,21 @@ class YouTubeUploader:
             'scopes': creds.scopes
         }
         
+        # Validate no critical fields are None
+        required_fields = ['client_id', 'client_secret', 'token_uri']
+        for field in required_fields:
+            if not creds_data.get(field):
+                raise ValueError(f"Cannot save credentials: {field} is missing")
+        
         with open(self.credentials_path, 'w') as f:
             json.dump(creds_data, f, indent=2)
+        
+        # Set secure file permissions (owner read/write only)
+        try:
+            import stat
+            os.chmod(self.credentials_path, stat.S_IRUSR | stat.S_IWUSR)
+        except Exception as e:
+            print(f"Warning: Could not set secure permissions on credentials file: {e}")
     
     def authenticate(self) -> bool:
         """Authenticate with YouTube API."""
