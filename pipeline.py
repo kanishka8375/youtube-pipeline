@@ -87,6 +87,10 @@ class YouTubePipeline:
                 print(f"  Segment {i+1}: {audio_path.name}")
         print(f"  Generated {len(audio_paths)} audio files")
         
+        # Validate we have audio before proceeding
+        if not audio_paths:
+            raise ValueError("No audio files generated. TTS failed for all segments.")
+        
         # Step 3: Generate images
         image_paths = []
         if images_enabled:
