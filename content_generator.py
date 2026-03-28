@@ -30,7 +30,7 @@ class ContentGenerator:
             try:
                 provider = LLMProviderFactory.create(provider_name)
                 # Test connection
-                provider.generate("test", max_tokens=1)
+                provider.generate("test")
                 print(f"Using provider: {provider_name}")
                 return provider
             except Exception as e:
@@ -43,7 +43,7 @@ class ContentGenerator:
             try:
                 provider = LLMProviderFactory.create(name)
                 # Test with a minimal request
-                provider.generate("hi", max_tokens=1)
+                provider.generate("hi")
                 print(f"Auto-selected provider: {name}")
                 return provider
             except Exception as e:
