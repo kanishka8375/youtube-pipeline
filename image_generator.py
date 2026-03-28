@@ -7,6 +7,27 @@ from pathlib import Path
 from typing import Optional, List, Dict
 
 
+def _download_with_retry(url: str, max_retries: int = 3, timeout: int = 120) -> Optional[bytes]:
+    """Download with exponential backoff retry."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response.content
+        except requests.exceptions.Timeout:
+            wait_time = 2 ** attempt  # 1, 2, 4 seconds
+            print(f"  Image download timeout (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s...")
+            time.sleep(wait_time)
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"  Image download error: {e}, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise
+    return None
+
+
 class FreeImageGenerator:
     """Generate images using Pollinations AI (free, reliable)."""
     
@@ -29,11 +50,12 @@ class FreeImageGenerator:
             # Pollinations is free and reliable
             url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
             
-            response = requests.get(url, timeout=120)
-            response.raise_for_status()
+            image_data = _download_with_retry(url, max_retries=3, timeout=120)
+            if image_data is None:
+                return None
             
             with open(output_path, "wb") as f:
-                f.write(response.content)
+                f.write(image_data)
             
             return str(output_path)
             
