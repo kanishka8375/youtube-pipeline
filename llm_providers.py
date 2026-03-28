@@ -38,9 +38,33 @@ class BaseLLMProvider(ABC):
 class OllamaProvider(BaseLLMProvider):
     """Local LLM via Ollama API."""
     
-    def __init__(self, model: str = "llama3.2", base_url: str = "http://localhost:11434"):
-        self.model = model
+    def __init__(self, model: Optional[str] = None, base_url: str = "http://localhost:11434"):
         self.base_url = base_url
+        # Auto-detect model if not specified
+        self.model = model or self._auto_detect_model()
+    
+    def _auto_detect_model(self) -> str:
+        """Auto-detect available model from Ollama."""
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                if models:
+                    # Prefer common models, otherwise use first available
+                    preferred = ["qwen3.5", "qwen2.5", "llama3.2", "llama3.1", "mistral", "phi3"]
+                    for model_name in preferred:
+                        for m in models:
+                            name = m.get("name", m.get("model", ""))
+                            if model_name in name.lower():
+                                print(f"Auto-detected model: {name}")
+                                return name
+                    # Fallback to first available
+                    first_model = models[0].get("name", models[0].get("model", "llama3.2"))
+                    print(f"Auto-detected model: {first_model}")
+                    return first_model
+        except Exception as e:
+            print(f"Model detection failed: {e}")
+        return "llama3.2"
     
     def is_available(self) -> bool:
         try:
