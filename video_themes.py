@@ -264,8 +264,19 @@ THEMES = {
 
 
 def get_theme(theme_name: str) -> VideoTheme:
-    """Get a theme by name, fallback to modern."""
-    return THEMES.get(theme_name, THEMES["modern"])
+    """Get theme by name, fallback to modern if not found."""
+    if not theme_name:
+        print(f"Warning: No theme specified, using 'modern'")
+        return THEMES["modern"]
+    
+    theme = THEMES.get(theme_name)
+    if theme is None:
+        available = list(THEMES.keys())
+        print(f"Warning: Unknown theme '{theme_name}'. Available themes: {available}")
+        print(f"Using 'modern' theme as fallback")
+        return THEMES["modern"]
+    
+    return theme
 
 
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
