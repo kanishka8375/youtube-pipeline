@@ -29,12 +29,11 @@ class ContentGenerator:
         if provider_name and provider_name != "auto":
             try:
                 provider = LLMProviderFactory.create(provider_name)
-                # Test connection
-                provider.generate("test")
-                print(f"Using provider: {provider_name}")
-                return provider
+                if provider.is_available():
+                    print(f"Using provider: {provider_name}")
+                    return provider
             except Exception as e:
-                print(f"{provider_name} failed: {e}")
+                print(f"{provider_name} not available: {e}")
         
         # Try providers in order of preference
         providers_to_try = ["ollama", "groq", "gemini"]
@@ -42,10 +41,9 @@ class ContentGenerator:
         for name in providers_to_try:
             try:
                 provider = LLMProviderFactory.create(name)
-                # Test with a minimal request
-                provider.generate("hi")
-                print(f"Auto-selected provider: {name}")
-                return provider
+                if provider.is_available():
+                    print(f"Auto-selected provider: {name}")
+                    return provider
             except Exception as e:
                 print(f"  {name} not available: {e}")
                 continue
