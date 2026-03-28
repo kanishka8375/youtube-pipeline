@@ -58,13 +58,14 @@ class OllamaProvider(BaseLLMProvider):
                         model_names.append(name)
                         print(f"  - {name}")
                     
-                    # Prefer common models
+                    # Prefer common models (in priority order)
                     preferred = ["qwen3.5", "qwen2.5", "llama3.2", "llama3.1", "mistral", "phi3"]
-                    for model_name in preferred:
-                        for name in model_names:
-                            if model_name in name.lower():
-                                print(f"\nSelected: {name}")
-                                return name
+                    # Check by priority order, not by model_names order
+                    for preferred_name in preferred:
+                        for available_model in model_names:
+                            if preferred_name in available_model.lower():
+                                print(f"\nSelected: {available_model}")
+                                return available_model
                     
                     # Fallback to first available
                     print(f"\nSelected: {model_names[0]}")
