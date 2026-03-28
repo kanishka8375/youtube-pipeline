@@ -59,6 +59,7 @@ class MediaGenerator:
         self.image_dir = self.output_dir / "images"
         self.audio_dir.mkdir(exist_ok=True)
         self.image_dir.mkdir(exist_ok=True)
+        self._font_cache = None  # Cache for loaded font
     
     async def generate_speech(self, text: str, output_path: Optional[str] = None, 
                               voice: str = "en-US-AriaNeural") -> str:
@@ -106,14 +107,19 @@ class MediaGenerator:
         img = Image.new('RGB', (width, height), bg_color)
         draw = ImageDraw.Draw(img)
         
-        font_path = _get_system_font()
-        try:
-            if font_path:
-                font = ImageFont.truetype(font_path, 80)
-            else:
+        # Use cached font if available
+        if self._font_cache is not None:
+            font = self._font_cache
+        else:
+            font_path = _get_system_font()
+            try:
+                if font_path:
+                    font = ImageFont.truetype(font_path, 80)
+                    self._font_cache = font  # Cache for reuse
+                else:
+                    font = ImageFont.load_default()
+            except:
                 font = ImageFont.load_default()
-        except:
-            font = ImageFont.load_default()
         
         words = text.split()
         lines = []
