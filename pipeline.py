@@ -44,13 +44,13 @@ class YouTubePipeline:
         self.music_dir = self.assets_dir / "music"
         self.music_dir.mkdir(parents=True, exist_ok=True)
     
-    def _report_progress(self, callback, step: int, total: int, message: str):
+    def _report_progress(self, step: int, total: int, message: str):
         """Report progress via callback or print."""
         pct = int((step / total) * 100)
         msg = f"[{step}/{total}] {message} ({pct}%)"
         print(msg)
-        if callback:
-            callback({"step": step, "total": total, "percent": pct, "message": message})
+        if hasattr(self, '_progress_callback') and self._progress_callback:
+            self._progress_callback({"step": step, "total": total, "percent": pct, "message": message})
     
     async def create_video(self, 
                           topic: str,
@@ -71,7 +71,7 @@ class YouTubePipeline:
         print(f"{'='*60}\n")
         
         # Step 1: Generate content
-        self._report_progress(progress_callback, 1, total_steps, "Generating script")
+        self._report_progress(1, total_steps, "Generating script")
         content = self.content_gen.generate_script(
             topic=topic,
             duration_seconds=duration,
@@ -86,7 +86,7 @@ class YouTubePipeline:
             json.dump(content, f, indent=2)
         
         # Step 2: Generate audio (TTS)
-        self._report_progress(progress_callback, 2, total_steps, "Generating audio (TTS)")
+        self._report_progress(2, total_steps, "Generating audio (TTS)")
         audio_paths = []
         for i, segment in enumerate(content['segments']):
             text = segment.get("text", "")
@@ -103,7 +103,7 @@ class YouTubePipeline:
         # Step 3: Generate images
         image_paths = []
         if images_enabled:
-            self._report_progress(progress_callback, 3, total_steps, "Generating images")
+            self._report_progress(3, total_steps, "Generating images")
             for i, segment in enumerate(content['segments']):
                 seg_type = segment.get("type", "content")
                 if seg_type == "content":
@@ -122,7 +122,7 @@ class YouTubePipeline:
                     image_paths.append(None)
         
         # Step 4: Assemble video
-        self._report_progress(progress_callback, 4, total_steps, "Assembling video")
+        self._report_progress(4, total_steps, "Assembling video")
         # Add timestamp to prevent filename collisions
         timestamp = int(time.time())
         video_path = self.output_dir / f"{self._sanitize_filename(content['title'])}_{timestamp}.mp4"
@@ -160,7 +160,7 @@ class YouTubePipeline:
         
         # Upload to YouTube
         if upload:
-            self._report_progress(progress_callback, 5, total_steps, "Uploading to YouTube")
+            self._report_progress(5, total_steps, "Uploading to YouTube")
             video_id = self.uploader.upload_video(
                 video_path=str(video_path),
                 title=content['title'],
