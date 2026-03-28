@@ -5,11 +5,11 @@ from typing import List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
-from moviepy.editor import (
+from moviepy import (
     AudioFileClip, ImageClip, concatenate_videoclips,
     CompositeVideoClip, TextClip, ColorClip
 )
-from moviepy.video.fx.all import fadein, fadeout
+from moviepy.video.fx import FadeIn, FadeOut
 
 from video_themes import get_theme
 
@@ -59,8 +59,7 @@ class VideoAssembler:
             visual = visual.set_audio(audio)
             
             # Add fade transitions
-            visual = fadein(visual, self.theme.fade_duration)
-            visual = fadeout(visual, self.theme.fade_duration)
+            visual = visual.with_effects([FadeIn(self.theme.fade_duration), FadeOut(self.theme.fade_duration)])
             
             video_clips.append(visual)
         
@@ -161,8 +160,7 @@ class VideoAssembler:
             img_clip = img_clip.set_duration(duration)
             
             # Add fade
-            img_clip = fadein(img_clip, self.theme.fade_duration)
-            img_clip = fadeout(img_clip, self.theme.fade_duration)
+            img_clip = img_clip.with_effects([FadeIn(self.theme.fade_duration), FadeOut(self.theme.fade_duration)])
             
             return img_clip
             
@@ -228,7 +226,7 @@ class VideoAssembler:
     
     def _create_border(self, duration: float):
         """Create accent border overlay."""
-        from moviepy.editor import ImageClip
+        from moviepy import ImageClip
         
         border_width = self.theme.border_width
         border_color = self._hex_to_rgb(self.theme.border_color)
