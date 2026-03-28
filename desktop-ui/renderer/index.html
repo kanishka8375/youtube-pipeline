@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Video Generator</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 2.5rem;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .subtitle {
+      color: rgba(255,255,255,0.9);
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      margin-bottom: 30px;
+    }
+
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #444;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 14px 18px;
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      font-size: 16px;
+      transition: all 0.3s;
+      background: #fafafa;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: #667eea;
+      background: white;
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .checkbox-group {
+      display: flex;
+      gap: 30px;
+      flex-wrap: wrap;
+    }
+
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .checkbox-item input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+      cursor: pointer;
+    }
+
+    .checkbox-item label {
+      margin: 0;
+      text-transform: none;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 18px 30px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      padding: 12px 24px;
+      background: #f0f0f0;
+      color: #444;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+
+    .progress-section {
+      display: none;
+      margin-top: 30px;
+    }
+
+    .progress-section.active {
+      display: block;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .progress-bar {
+      height: 10px;
+      background: #e0e0e0;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.5s;
+      width: 0%;
+    }
+
+    .terminal {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 20px;
+      border-radius: 12px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+      min-height: 200px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+
+    .terminal-line {
+      margin: 2px 0;
+    }
+
+    .terminal-line.error {
+      color: #f38ba8;
+    }
+
+    .terminal-line.success {
+      color: #a6e3a1;
+    }
+
+    .videos-section {
+      margin-top: 30px;
+    }
+
+    .videos-section h2 {
+      color: white;
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .video-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      transition: transform 0.2s;
+    }
+
+    .video-card:hover {
+      transform: translateY(-4px);
+    }
+
+    .video-name {
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #333;
+      word-break: break-all;
+    }
+
+    .video-meta {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 15px;
+    }
+
+    .video-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn-small {
+      padding: 8px 16px;
+      font-size: 13px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-open {
+      background: #667eea;
+      color: white;
+    }
+
+    .btn-open:hover {
+      background: #5a6fd6;
+    }
+
+    .btn-folder {
+      background: #f0f0f0;
+      color: #444;
+    }
+
+    .btn-folder:hover {
+      background: #e0e0e0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: rgba(255,255,255,0.7);
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid white;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .result-success {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+      padding: 20px;
+      border-radius: 12px;
+      margin-top: 20px;
+    }
+
+    .result-error {
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      color: #721c24;
+      padding: 20px;
+      border-radius: 12px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>YouTube Video Generator</h1>
+    <p class="subtitle">AI-powered video creation pipeline</p>
+
+    <div class="card">
+      <form id="generateForm">
+        <div class="form-group">
+          <label for="topic">Video Topic *</label>
+          <input type="text" id="topic" placeholder="e.g., The History of Space Exploration" required>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label for="duration">Duration (seconds)</label>
+            <input type="number" id="duration" value="60" min="30" max="300">
+          </div>
+
+          <div class="form-group">
+            <label for="style">Content Style</label>
+            <select id="style">
+              <option value="educational">Educational</option>
+              <option value="entertainment">Entertainment</option>
+              <option value="documentary">Documentary</option>
+              <option value="news">News</option>
+              <option value="tutorial">Tutorial</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label for="theme">Visual Theme</label>
+            <select id="theme">
+              <option value="modern">Modern</option>
+              <option value="minimal">Minimal</option>
+              <option value="vibrant">Vibrant</option>
+              <option value="corporate">Corporate</option>
+              <option value="cinematic">Cinematic</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Options</label>
+            <div class="checkbox-group">
+              <div class="checkbox-item">
+                <input type="checkbox" id="music" checked>
+                <label for="music">Background Music</label>
+              </div>
+              <div class="checkbox-item">
+                <input type="checkbox" id="images" checked>
+                <label for="images">AI Images</label>
+              </div>
+              <div class="checkbox-item">
+                <input type="checkbox" id="upload">
+                <label for="upload">Upload to YouTube</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" id="submitBtn">
+          <span>Generate Video</span>
+        </button>
+      </form>
+
+      <div class="progress-section" id="progressSection">
+        <div class="progress-header">
+          <span id="statusText">Generating...</span>
+          <button class="btn-secondary" id="stopBtn">Stop</button>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="terminal" id="terminal"></div>
+      </div>
+
+      <div id="result"></div>
+    </div>
+
+    <div class="videos-section">
+      <h2>Generated Videos</h2>
+      <div class="video-grid" id="videoGrid">
+        <div class="empty-state">No videos yet. Generate your first video above!</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    const form = document.getElementById('generateForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const progressSection = document.getElementById('progressSection');
+    const progressFill = document.getElementById('progressFill');
+    const terminal = document.getElementById('terminal');
+    const statusText = document.getElementById('statusText');
+    const stopBtn = document.getElementById('stopBtn');
+    const result = document.getElementById('result');
+
+    let isGenerating = false;
+
+    // Load videos on start
+    loadVideos();
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (isGenerating) return;
+
+      isGenerating = true;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<div class="spinner"></div><span>Generating...</span>';
+      progressSection.classList.add('active');
+      terminal.innerHTML = '';
+      result.innerHTML = '';
+      progressFill.style.width = '5%';
+      statusText.textContent = 'Starting...';
+
+      const data = {
+        topic: document.getElementById('topic').value,
+        duration: parseInt(document.getElementById('duration').value),
+        style: document.getElementById('style').value,
+        theme: document.getElementById('theme').value,
+        music: document.getElementById('music').checked,
+        images: document.getElementById('images').checked,
+        upload: document.getElementById('upload').checked
+      };
+
+      try {
+        const response = await ipcRenderer.invoke('generate-video', data);
+        progressFill.style.width = '100%';
+        statusText.textContent = 'Complete!';
+        result.innerHTML = `
+          <div class="result-success">
+            <strong>Video generated successfully!</strong>
+            <p>Check the output folder or the videos section below.</p>
+          </div>
+        `;
+        loadVideos();
+      } catch (err) {
+        progressFill.style.width = '0%';
+        statusText.textContent = 'Failed';
+        result.innerHTML = `
+          <div class="result-error">
+            <strong>Error:</strong> ${err.error || err.message || 'Unknown error'}
+          </div>
+        `;
+      } finally {
+        isGenerating = false;
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>Generate Video</span>';
+      }
+    });
+
+    stopBtn.addEventListener('click', async () => {
+      await ipcRenderer.invoke('stop-generation');
+      isGenerating = false;
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>Generate Video</span>';
+      statusText.textContent = 'Stopped';
+    });
+
+    // Terminal output
+    ipcRenderer.on('output', (event, text) => {
+      const line = document.createElement('div');
+      line.className = 'terminal-line';
+      
+      if (text.includes('Error') || text.includes('Traceback')) {
+        line.classList.add('error');
+      } else if (text.includes('DONE') || text.includes('success')) {
+        line.classList.add('success');
+      }
+      
+      line.textContent = text;
+      terminal.appendChild(line);
+      terminal.scrollTop = terminal.scrollHeight;
+
+      // Update progress based on output
+      if (text.includes('[1/4]')) progressFill.style.width = '15%';
+      else if (text.includes('[2/4]')) progressFill.style.width = '40%';
+      else if (text.includes('[3/4]')) progressFill.style.width = '65%';
+      else if (text.includes('[4/4]')) progressFill.style.width = '85%';
+      else if (text.includes('DONE')) progressFill.style.width = '100%';
+      
+      if (text.includes('[')) {
+        statusText.textContent = text.split('\n')[0];
+      }
+    });
+
+    async function loadVideos() {
+      const videos = await ipcRenderer.invoke('get-videos');
+      const grid = document.getElementById('videoGrid');
+      
+      if (videos.length === 0) {
+        grid.innerHTML = '<div class="empty-state">No videos yet. Generate your first video above!</div>';
+        return;
+      }
+
+      grid.innerHTML = videos.map(v => {
+        const size = (v.size / 1024 / 1024).toFixed(1);
+        const date = new Date(v.date).toLocaleDateString();
+        return `
+          <div class="video-card">
+            <div class="video-name">${v.name}</div>
+            <div class="video-meta">${size} MB • ${date}</div>
+            <div class="video-actions">
+              <button class="btn-small btn-open" onclick="openVideo('${v.path}')">Open</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function openVideo(path) {
+      await ipcRenderer.invoke('open-video', path);
+    }
+  </script>
+</body>
+</html>
