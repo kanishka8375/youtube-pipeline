@@ -226,7 +226,7 @@ class YouTubePipeline:
 
 def main():
     parser = argparse.ArgumentParser(description="YouTube Video Generator")
-    parser.add_argument("--topic", required=True, help="Video topic")
+    parser.add_argument("--topic", default=None, help="Video topic (or will prompt)")
     parser.add_argument("--duration", type=int, default=60, help="Duration in seconds")
     parser.add_argument("--style", default="educational", help="Content style")
     parser.add_argument("--theme", default="modern", 
@@ -244,13 +244,21 @@ def main():
     
     args = parser.parse_args()
     
+    # Prompt for topic if not provided
+    topic = args.topic
+    if not topic:
+        topic = input("Enter video topic: ").strip()
+        if not topic:
+            print("Error: Topic is required")
+            return
+    
     pipeline = YouTubePipeline(
         provider_name=args.provider,
         theme=args.theme
     )
     
     result = asyncio.run(pipeline.create_video(
-        topic=args.topic,
+        topic=topic,
         duration=args.duration,
         style=args.style,
         theme=args.theme,
