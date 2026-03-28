@@ -116,16 +116,9 @@ class MediaGenerator:
         return output_path
     
     def download_stock_image(self, query: str, output_path: str) -> Optional[str]:
-        """Download stock image from Unsplash."""
-        try:
-            url = f"https://source.unsplash.com/1920x1080/?{query.replace(' ', ',')}"
-            response = requests.get(url, timeout=30, allow_redirects=True)
-            if response.status_code == 200:
-                with open(output_path, 'wb') as f:
-                    f.write(response.content)
-                return output_path
-        except Exception as e:
-            print(f"Failed to download image: {e}")
+        """Download stock image - disabled as Unsplash API deprecated."""
+        # Unsplash Source API is deprecated (2022), returns 404
+        # Use Pollinations AI via image_generator.py instead
         return None
 
 

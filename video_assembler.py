@@ -149,11 +149,16 @@ class VideoAssembler:
             target_width = self.size[0] * 0.75
             target_height = self.size[1] * 0.55
             
-            # Resize maintaining aspect ratio
-            img_clip = img_clip.resize(
-                width=target_width,
-                height=target_height
-            )
+            # Resize maintaining aspect ratio - fit within bounds
+            img_width, img_height = img_clip.size
+            scale_w = target_width / img_width
+            scale_h = target_height / img_height
+            scale = min(scale_w, scale_h)  # Use smaller scale to fit entirely
+            
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            
+            img_clip = img_clip.resize(width=new_width, height=new_height)
             
             # Position in center-top area
             img_clip = img_clip.set_position(("center", "top")).margin(top=60)
@@ -226,8 +231,6 @@ class VideoAssembler:
     
     def _create_border(self, duration: float):
         """Create accent border overlay."""
-        from moviepy import ImageClip
-        
         border_width = self.theme.border_width
         border_color = self._hex_to_rgb(self.theme.border_color)
         
