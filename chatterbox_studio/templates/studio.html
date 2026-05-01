@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chatterbox Studio</title>
+  <link rel="stylesheet" href="/static/studio.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">●</span>
+      <span class="brand-name">Chatterbox Studio</span>
+      <span class="brand-sub">Multilingual voice-over</span>
+    </div>
+    <div class="topbar-status">
+      <span class="status-pill" id="device-pill" title="Compute device">
+        <span class="dot dot--muted"></span><span id="device-label">CPU</span>
+      </span>
+      <span class="status-pill" id="model-pill" title="Model state">
+        <span class="dot dot--warn"></span><span id="model-label">Loading…</span>
+      </span>
+      <span class="status-pill clickable" id="queue-pill" data-route="queue" title="Queue (Q)">
+        <span class="dot dot--accent"></span>Queue: <b id="queue-count">0</b>
+      </span>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="hotkeys-btn" title="Keyboard hotkeys (?)" aria-label="Hotkeys">⌨</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="rail" aria-label="Primary">
+      <button class="rail-item active" data-route="studio" title="Studio">
+        <span class="rail-icon">🎙</span><span class="rail-label">Studio</span>
+      </button>
+      <button class="rail-item" data-route="batch" title="Batch (B)">
+        <span class="rail-icon">⊞</span><span class="rail-label">Batch</span>
+      </button>
+      <button class="rail-item" data-route="voices" title="Voice Library (V)">
+        <span class="rail-icon">♪</span><span class="rail-label">Voices</span>
+      </button>
+      <button class="rail-item" data-route="history" title="History (H)">
+        <span class="rail-icon">⌚</span><span class="rail-label">History</span>
+      </button>
+      <button class="rail-item" data-route="queue" title="Queue (Q)">
+        <span class="rail-icon">⚡</span><span class="rail-label">Queue</span>
+        <span class="rail-badge" id="rail-queue-badge" hidden>0</span>
+      </button>
+    </nav>
+
+    <main class="workspace" id="workspace">
+      <!-- studio route -->
+      <section class="route" data-route="studio">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Script</h2>
+            <div class="panel-meta">
+              <span id="char-count">0</span> chars
+              <span class="dot-sep">•</span>
+              <span id="chunk-hint">1 chunk</span>
+            </div>
+          </div>
+          <textarea
+            id="script-input"
+            placeholder="Type or paste your voice-over script here. Tip: use [PAUSE] or punctuation for natural breaks."
+            spellcheck="false"
+            rows="6"
+          ></textarea>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Language</h2>
+            <button class="link-btn" id="lang-add">+ Add language</button>
+          </div>
+          <div class="lang-chips" id="lang-chips"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Voice</h2>
+            <button class="link-btn" data-route="voices">Manage</button>
+          </div>
+          <div class="voice-cards" id="voice-cards"></div>
+        </div>
+
+        <div class="generate-row">
+          <div class="hint" id="gen-hint">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to generate</div>
+          <button class="btn primary" id="generate-btn">▸ Generate</button>
+        </div>
+
+        <div class="panel" id="player-panel" hidden>
+          <div class="panel-head">
+            <h2>Result</h2>
+            <div class="panel-meta" id="player-meta"></div>
+          </div>
+          <canvas class="waveform" id="waveform" width="900" height="120"></canvas>
+          <div class="player-controls">
+            <button class="icon-btn" id="play-btn">▶</button>
+            <span class="time" id="player-time">0:00 / 0:00</span>
+            <input type="range" id="player-seek" min="0" max="1000" value="0" />
+            <button class="btn ghost" id="dl-btn">Download</button>
+            <button class="btn ghost" id="srt-btn">Copy SRT</button>
+            <button class="btn ghost" id="reroll-btn">Re-roll</button>
+          </div>
+          <audio id="player-audio" preload="auto"></audio>
+        </div>
+      </section>
+
+      <!-- batch route -->
+      <section class="route" data-route="batch" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Batch script</h2>
+            <div class="panel-meta"><span id="batch-char-count">0</span> chars</div>
+          </div>
+          <textarea id="batch-input" rows="5" spellcheck="false"
+                    placeholder="One script — generated in every selected language."></textarea>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Languages</h2>
+            <div class="batch-quick">
+              <button class="chip" data-batch-preset="all">All</button>
+              <button class="chip" data-batch-preset="eu">EU</button>
+              <button class="chip" data-batch-preset="asia">Asia</button>
+              <button class="chip" data-batch-preset="clear">Clear</button>
+            </div>
+          </div>
+          <div class="lang-grid" id="batch-grid"></div>
+        </div>
+        <div class="generate-row">
+          <div class="hint"><b id="batch-count">0</b> language(s) selected</div>
+          <button class="btn primary" id="batch-generate-btn">▸ Generate batch</button>
+        </div>
+        <div class="panel" id="batch-progress-panel" hidden>
+          <div class="panel-head"><h2>Batch progress</h2></div>
+          <div class="batch-list" id="batch-list"></div>
+        </div>
+      </section>
+
+      <!-- voices route -->
+      <section class="route" data-route="voices" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Voice Library</h2>
+            <button class="btn primary small" id="voice-upload-btn">+ Upload reference</button>
+          </div>
+          <div class="voice-grid" id="voice-grid"></div>
+          <input type="file" id="voice-file-input" accept="audio/*" hidden />
+        </div>
+      </section>
+
+      <!-- history route -->
+      <section class="route" data-route="history" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>History</h2>
+            <input class="search" id="history-search" placeholder="Search text…" />
+          </div>
+          <div class="history-list" id="history-list"></div>
+        </div>
+      </section>
+
+      <!-- queue route -->
+      <section class="route" data-route="queue" hidden>
+        <div class="queue-cols">
+          <div class="panel">
+            <div class="panel-head"><h2>Generating</h2></div>
+            <div class="queue-list" id="q-generating"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Queued</h2></div>
+            <div class="queue-list" id="q-queued"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Recent</h2></div>
+            <div class="queue-list" id="q-recent"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="settings" id="settings-panel">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Voice settings</h2>
+          <button class="link-btn" id="reset-settings">Reset</button>
+        </div>
+        <div class="presets">
+          <button class="chip preset-chip active" data-preset="conversational">Conversational</button>
+          <button class="chip preset-chip" data-preset="narration">Narration</button>
+          <button class="chip preset-chip" data-preset="dramatic">Dramatic</button>
+          <button class="chip preset-chip" data-preset="custom">Custom</button>
+        </div>
+
+        <div class="slider-row">
+          <label>
+            Exaggeration
+            <span class="hint" title="Expressiveness">ⓘ</span>
+            <span class="value" id="exaggeration-value">0.50</span>
+          </label>
+          <input type="range" id="exaggeration" min="0.25" max="2.0" step="0.05" value="0.5" />
+        </div>
+
+        <div class="slider-row">
+          <label>
+            CFG weight
+            <span class="hint" title="Speaker adherence">ⓘ</span>
+            <span class="value" id="cfg_weight-value">0.50</span>
+          </label>
+          <input type="range" id="cfg_weight" min="0.0" max="1.0" step="0.05" value="0.5" />
+        </div>
+
+        <div class="slider-row">
+          <label>
+            Temperature
+            <span class="hint" title="Sampling variability">ⓘ</span>
+            <span class="value" id="temperature-value">0.80</span>
+          </label>
+          <input type="range" id="temperature" min="0.05" max="5.0" step="0.05" value="0.8" />
+        </div>
+
+        <div class="setting-row">
+          <label for="seed">Seed</label>
+          <div class="seed-row">
+            <input type="number" id="seed" placeholder="random" min="0" />
+            <button class="icon-btn" id="seed-random" title="Random seed">🎲</button>
+          </div>
+        </div>
+
+        <label class="toggle-row">
+          <input type="checkbox" id="language-transfer" />
+          <span>Language transfer mode</span>
+          <span class="hint" title="Forces CFG=0 — your reference voice carries timbre across the target language">ⓘ</span>
+        </label>
+      </div>
+    </aside>
+  </div>
+
+  <!-- modals/overlays -->
+  <div class="modal" id="hotkeys-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Keyboard hotkeys</h2>
+        <button class="icon-btn" data-close-modal>✕</button>
+      </div>
+      <ul class="hotkeys">
+        <li><kbd>Ctrl/⌘</kbd>+<kbd>Enter</kbd><span>Generate</span></li>
+        <li><kbd>Q</kbd><span>Open Queue</span></li>
+        <li><kbd>H</kbd><span>Open History</span></li>
+        <li><kbd>V</kbd><span>Open Voice Library</span></li>
+        <li><kbd>B</kbd><span>Open Batch mode</span></li>
+        <li><kbd>1</kbd>–<kbd>9</kbd><span>Pick recent language</span></li>
+        <li><kbd>?</kbd><span>This panel</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="modal" id="upload-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Upload reference voice</h2>
+        <button class="icon-btn" data-close-modal>✕</button>
+      </div>
+      <label class="field">
+        <span>Name</span>
+        <input id="upload-name" placeholder="Narrator" />
+      </label>
+      <label class="field">
+        <span>Audio file (≥5 s recommended)</span>
+        <input id="upload-file" type="file" accept="audio/*" />
+      </label>
+      <div class="modal-foot">
+        <button class="btn primary" id="upload-confirm">Upload</button>
+      </div>
+      <div class="hint" id="upload-error"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="lang-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Add language</h2>
+        <button class="icon-btn" data-close-modal>✕</button>
+      </div>
+      <input class="search" id="lang-search" placeholder="Search…" />
+      <div class="lang-pick-list" id="lang-pick-list"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/static/studio.js" defer></script>
+</body>
+</html>
