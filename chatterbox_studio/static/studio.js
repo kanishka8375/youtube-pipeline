@@ -1,776 +1,957 @@
-// Chatterbox Studio frontend — vanilla JS, no frameworks.
+// ChatterBox Studio v2 — vanilla JS, ComfyUI-style multi-model TTS.
 
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const PRESETS = {
-  conversational: { exaggeration: 0.5,  cfg_weight: 0.5, temperature: 0.8 },
-  narration:      { exaggeration: 0.4,  cfg_weight: 0.6, temperature: 0.7 },
-  dramatic:       { exaggeration: 0.85, cfg_weight: 0.4, temperature: 1.1 },
+const PARAM_SCHEMAS = {
+  tts_turbo: [
+    { key: 'temperature', label: 'Temperature', min: 0.05, max: 2.0, step: 0.05, default: 0.8, hint: 'randomness' },
+    { key: 'top_p', label: 'Top P', min: 0, max: 1, step: 0.01, default: 0.95 },
+    { key: 'top_k', label: 'Top K', min: 0, max: 1000, step: 10, default: 1000 },
+    { key: 'repetition_penalty', label: 'Repetition Penalty', min: 1.0, max: 2.0, step: 0.05, default: 1.2 },
+    { key: 'min_p', label: 'Min P', min: 0, max: 1, step: 0.01, default: 0.0, hint: '0 = off' },
+    { key: 'norm_loudness', label: 'Normalize Loudness (−27 LUFS)', type: 'toggle', default: true },
+  ],
+  tts: [
+    { key: 'exaggeration', label: 'Exaggeration', min: 0.25, max: 2.0, step: 0.05, default: 0.5, hint: 'neutral = 0.5' },
+    { key: 'cfg_weight', label: 'CFG / Pace', min: 0, max: 1, step: 0.05, default: 0.5, hint: 'lower = slower' },
+    { key: 'temperature', label: 'Temperature', min: 0.05, max: 5, step: 0.05, default: 0.8 },
+    { key: 'min_p', label: 'Min P', min: 0, max: 1, step: 0.01, default: 0.05 },
+    { key: 'top_p', label: 'Top P', min: 0, max: 1, step: 0.01, default: 1.0 },
+    { key: 'repetition_penalty', label: 'Repetition Penalty', min: 1.0, max: 2.0, step: 0.1, default: 1.2 },
+  ],
+  mtl_tts: [
+    { key: 'exaggeration', label: 'Exaggeration', min: 0.25, max: 2.0, step: 0.05, default: 0.5, hint: 'neutral = 0.5' },
+    { key: 'cfg_weight', label: 'CFG / Pace', min: 0.2, max: 1.0, step: 0.05, default: 0.5, hint: '0 = lang transfer' },
+    { key: 'temperature', label: 'Temperature', min: 0.05, max: 5, step: 0.05, default: 0.8 },
+  ],
+  onnx: [
+    { key: 'temperature', label: 'Temperature', min: 0.05, max: 2.0, step: 0.05, default: 0.8 },
+    { key: 'top_p', label: 'Top P', min: 0, max: 1, step: 0.01, default: 0.95 },
+    { key: 'top_k', label: 'Top K', min: 0, max: 1000, step: 10, default: 1000 },
+    { key: 'repetition_penalty', label: 'Repetition Penalty', min: 1.0, max: 2.0, step: 0.05, default: 1.2 },
+  ],
 };
-const EU_LANGS  = ["en", "es", "fr", "de", "it", "pt", "nl", "pl", "sv", "fi", "no", "da", "el", "tr"];
-const ASIA_LANGS = ["zh", "ja", "ko", "hi", "ms"];
 
 const state = {
+  models: [],          // from /api/models
   languages: [],
-  langSet: new Set(),
-  recentLangs: ["en"],
-  selectedLang: "en",
-  refs: [],
-  selectedRef: null, // null = default voice
-  preset: "conversational",
-  params: { ...PRESETS.conversational, seed: null, language_transfer: false },
+  device: 'cuda',
+  activeModelId: localStorage.getItem('cb_active') || 'chatterbox-multilingual',
+  text: '',
+  params: {},
+  language: 'fr',
+  refName: null,       // saved server-side ref name
+  refFile: null,       // pending unsaved upload (object URL only)
+  seed: 0,
   jobId: null,
   jobPoll: null,
   statusPoll: null,
-  audioBuffer: null,
+  audioBuf: null,
   audioCtx: null,
-  player: null,
+  // UI panels
+  leftTab: 'voices',
+  managerOpen: false,
+  managerModel: null,
+  managerTab: 'install',
   history: [],
-  batchSelected: new Set(),
-  batchActive: null, // {batchId, jobIds}
-  batchPoll: null,
+  // waveform animation
+  wavState: 'idle',
+  wavRaf: null,
 };
 
-// ----------- toast -----------
-function toast(msg, type = "info") {
-  const el = $("#toast");
-  el.textContent = msg;
-  el.className = "toast" + (type === "error" ? " error" : "");
-  el.hidden = false;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => (el.hidden = true), 3000);
-}
-
-// ----------- routing -----------
-function gotoRoute(name) {
-  $$(".route").forEach((r) => (r.hidden = r.dataset.route !== name));
-  $$(".rail-item").forEach((b) => b.classList.toggle("active", b.dataset.route === name));
-  if (name === "history") loadHistory();
-  if (name === "voices") renderVoiceGrid();
-  if (name === "queue") refreshQueue();
-  if (name === "batch") renderBatchGrid();
-}
-
-document.addEventListener("click", (e) => {
-  const target = e.target.closest("[data-route]");
-  if (target) {
-    gotoRoute(target.dataset.route);
-  }
-});
-
-// ----------- status polling -----------
-async function fetchJSON(url, opts) {
-  const res = await fetch(url, opts);
-  const data = await res.json().catch(() => ({}));
+// ─── tiny helpers ───────────────────────────────────────────────────────────
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  let data = {};
+  try { data = await res.json(); } catch {}
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
 
-async function pollStatus() {
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;" }[c]));
+}
+
+function showToast(msg, type = 'info') {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type;
+  el.classList.remove('hidden');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.add('hidden'), 2800);
+}
+
+function activeModel() { return state.models.find(m => m.id === state.activeModelId) || state.models[0]; }
+function isInstalled(id) { const m = state.models.find(x => x.id === id); return !!(m && m.status && m.status.installed); }
+
+// ─── Topbar status loop ─────────────────────────────────────────────────────
+async function refreshTopStatus() {
   try {
-    const s = await fetchJSON("/api/status");
-    const dev = s.device || {};
-    $("#device-label").textContent = (dev.device || "cpu").toUpperCase();
-    const devDot = $("#device-pill .dot");
-    devDot.className = "dot " + (dev.device === "cuda" ? "dot--success" : dev.device === "mps" ? "dot--accent" : "dot--muted");
-    if (dev.vram_free_gb != null) {
-      $("#device-pill").title = `${dev.name} • ${dev.vram_free_gb} GB free`;
-    } else {
-      $("#device-pill").title = dev.name || "CPU";
-    }
+    const s = await api('/api/status');
+    state.device = (s.device || {}).device || 'cpu';
+    const sel = $('#device-select');
+    if (sel.value !== state.device) sel.value = state.device;
+    const dot = $('#device-dot');
+    dot.classList.toggle('muted', state.device === 'cpu');
+    sel.title = (s.device.name || '') + (s.device.vram_free_gb != null ? ` · ${s.device.vram_free_gb} GB free` : '');
+  } catch {}
+}
 
-    const m = s.model || {};
-    $("#model-label").textContent =
-      m.status === "ready" ? "Ready" :
-      m.status === "loading" ? "Loading model…" :
-      m.status === "error" ? "Error" :
-      "Idle";
-    const modelDot = $("#model-pill .dot");
-    modelDot.className = "dot " + (
-      m.status === "ready" ? "dot--success" :
-      m.status === "loading" ? "dot--warn" :
-      m.status === "error" ? "dot--danger" :
-      "dot--muted"
-    );
-
-    const queued = (s.queue?.queued || 0) + (s.queue?.generating || 0);
-    $("#queue-count").textContent = queued;
-    const railBadge = $("#rail-queue-badge");
-    if (queued > 0) {
-      railBadge.hidden = false;
-      railBadge.textContent = queued;
-    } else {
-      railBadge.hidden = true;
-    }
-  } catch (e) {
-    /* swallow */
+// ─── Models load + render ──────────────────────────────────────────────────
+async function loadModels() {
+  const data = await api('/api/models');
+  state.models = data.models;
+  // ensure activeModelId is valid
+  if (!state.models.find(m => m.id === state.activeModelId)) {
+    state.activeModelId = state.models[0]?.id;
   }
+  renderLeft();
+  renderModelHeader();
+  renderParams();
+  renderFolderInfo();
+  renderStatusCard();
+  if (state.managerOpen) renderManagerList();
 }
 
-// ----------- languages -----------
-async function loadLanguages() {
-  const data = await fetchJSON("/api/languages");
-  state.languages = data.languages;
-  state.langSet = new Set(data.languages.map((l) => l.code));
-  renderLangChips();
-}
-
-function renderLangChips() {
-  const root = $("#lang-chips");
-  root.innerHTML = "";
-  state.recentLangs.forEach((code) => {
-    const meta = state.languages.find((l) => l.code === code);
-    const btn = document.createElement("button");
-    btn.className = "chip" + (code === state.selectedLang ? " active" : "");
-    btn.dataset.lang = code;
-    btn.innerHTML = `${meta ? meta.name : code} <span class="lang-code">(${code})</span>`;
-    btn.addEventListener("click", () => {
-      state.selectedLang = code;
-      renderLangChips();
-      updateChunkHint();
-    });
-    root.appendChild(btn);
-  });
-}
-
-$("#lang-add").addEventListener("click", () => {
-  const modal = $("#lang-modal");
-  modal.hidden = false;
-  const list = $("#lang-pick-list");
-  const search = $("#lang-search");
-  search.value = "";
-  function render() {
-    const q = search.value.trim().toLowerCase();
-    list.innerHTML = "";
-    state.languages
-      .filter((l) => !q || l.name.toLowerCase().includes(q) || l.code.includes(q))
-      .forEach((l) => {
-        const row = document.createElement("div");
-        row.className = "lp-row";
-        row.innerHTML = `<span>${l.name}</span><span class="lp-code">${l.code}</span>`;
-        row.addEventListener("click", () => {
-          if (!state.recentLangs.includes(l.code)) {
-            state.recentLangs.unshift(l.code);
-            if (state.recentLangs.length > 8) state.recentLangs.pop();
-          }
-          state.selectedLang = l.code;
-          renderLangChips();
-          modal.hidden = true;
-        });
-        list.appendChild(row);
-      });
-  }
-  search.oninput = render;
-  render();
-  setTimeout(() => search.focus(), 50);
-});
-
-// ----------- voice cards -----------
-async function loadRefs() {
-  const data = await fetchJSON("/api/refs");
-  state.refs = data.refs || [];
-  renderVoiceCards();
-  renderVoiceGrid();
-}
-
-function renderVoiceCards() {
-  const root = $("#voice-cards");
-  root.innerHTML = "";
-
-  const def = document.createElement("div");
-  def.className = "voice-card" + (state.selectedRef === null ? " active" : "");
-  def.innerHTML = `
-    <div class="vc-name">Default</div>
-    <div class="vc-thumb"></div>
-    <div class="vc-sub">Built-in voice</div>
-  `;
-  def.addEventListener("click", () => {
-    state.selectedRef = null;
-    renderVoiceCards();
-  });
-  root.appendChild(def);
-
-  state.refs.forEach((r) => {
-    const card = document.createElement("div");
-    card.className = "voice-card" + (state.selectedRef === r.name ? " active" : "");
-    card.innerHTML = `
-      <div class="vc-name">${escapeHtml(r.name)}</div>
-      <div class="vc-thumb"></div>
-      <div class="vc-sub">${(r.duration_sec || 0).toFixed(1)}s ref</div>
-    `;
-    card.addEventListener("click", () => {
-      state.selectedRef = r.name;
-      renderVoiceCards();
-    });
-    root.appendChild(card);
-  });
-
-  const add = document.createElement("div");
-  add.className = "voice-card add";
-  add.textContent = "+ Upload";
-  add.addEventListener("click", () => openUploadModal());
-  root.appendChild(add);
-}
-
-function renderVoiceGrid() {
-  const root = $("#voice-grid");
-  if (!root) return;
-  root.innerHTML = "";
-  if (state.refs.length === 0) {
-    root.innerHTML = `<div class="hint">No reference voices yet — upload a 5–10 s audio clip to clone a voice across all 23 languages.</div>`;
-    return;
-  }
-  state.refs.forEach((r) => {
-    const c = document.createElement("div");
-    c.className = "vg-card";
-    c.innerHTML = `
-      <div class="vg-name">${escapeHtml(r.name)}</div>
-      <div class="vg-meta">${(r.duration_sec || 0).toFixed(1)}s • ${escapeHtml(r.filename || "")}</div>
-      <div class="vg-actions">
-        <button class="btn small" data-act="select">Use</button>
-        <button class="btn small ghost" data-act="delete">Delete</button>
+function renderLeft() {
+  const body = $('#left-body');
+  if (state.leftTab === 'voices') {
+    const installed = state.models.filter(m => m.status?.installed).length;
+    body.innerHTML = `
+      <div class="section-title">Available Models · ${installed}/${state.models.length} installed</div>
+      <div id="voice-cards"></div>
+      <button class="add-models" id="add-models-btn">+ Add / Manage Models</button>`;
+    const host = $('#voice-cards');
+    host.innerHTML = '';
+    state.models.forEach(m => host.appendChild(renderVoiceCard(m)));
+    $('#add-models-btn').addEventListener('click', () => openManager());
+  } else {
+    const items = state.history;
+    body.innerHTML = `
+      <div class="section-title">
+        Generation History
+        ${items.length ? '<button class="clear-btn" id="clear-history">clear</button>' : ''}
       </div>
+      <div id="history-rows"></div>
+      ${items.length ? '' : '<div class="empty-state">No generations yet</div>'}
     `;
-    c.querySelector('[data-act="select"]').addEventListener("click", () => {
-      state.selectedRef = r.name;
-      renderVoiceCards();
-      gotoRoute("studio");
-      toast(`Selected "${r.name}"`);
-    });
-    c.querySelector('[data-act="delete"]').addEventListener("click", async () => {
-      if (!confirm(`Delete reference voice "${r.name}"?`)) return;
-      await fetchJSON(`/api/refs/${encodeURIComponent(r.name)}`, { method: "DELETE" });
-      if (state.selectedRef === r.name) state.selectedRef = null;
-      await loadRefs();
-    });
-    root.appendChild(c);
-  });
-}
-
-$("#voice-upload-btn").addEventListener("click", openUploadModal);
-
-function openUploadModal() {
-  $("#upload-name").value = "";
-  $("#upload-file").value = "";
-  $("#upload-error").textContent = "";
-  $("#upload-modal").hidden = false;
-}
-
-$("#upload-confirm").addEventListener("click", async () => {
-  const name = $("#upload-name").value.trim();
-  const file = $("#upload-file").files[0];
-  if (!name) { $("#upload-error").textContent = "Name required"; return; }
-  if (!file) { $("#upload-error").textContent = "File required"; return; }
-  const fd = new FormData();
-  fd.append("name", name);
-  fd.append("file", file);
-  try {
-    await fetchJSON("/api/refs", { method: "POST", body: fd });
-    $("#upload-modal").hidden = true;
-    await loadRefs();
-    toast(`Uploaded "${name}"`);
-  } catch (e) {
-    $("#upload-error").textContent = e.message;
-  }
-});
-
-// ----------- presets / sliders -----------
-function applyPreset(name) {
-  state.preset = name;
-  if (PRESETS[name]) {
-    Object.assign(state.params, PRESETS[name]);
-    syncSlidersFromState();
-  }
-  $$(".preset-chip").forEach((c) => c.classList.toggle("active", c.dataset.preset === name));
-}
-
-function syncSlidersFromState() {
-  ["exaggeration", "cfg_weight", "temperature"].forEach((k) => {
-    const slider = $("#" + k);
-    const label = $("#" + k + "-value");
-    slider.value = state.params[k];
-    label.textContent = (+state.params[k]).toFixed(2);
-  });
-}
-
-$$(".preset-chip").forEach((c) =>
-  c.addEventListener("click", () => applyPreset(c.dataset.preset))
-);
-$("#reset-settings").addEventListener("click", () => applyPreset("conversational"));
-
-["exaggeration", "cfg_weight", "temperature"].forEach((k) => {
-  const slider = $("#" + k);
-  slider.addEventListener("input", () => {
-    state.params[k] = +slider.value;
-    $("#" + k + "-value").textContent = (+slider.value).toFixed(2);
-    state.preset = "custom";
-    $$(".preset-chip").forEach((c) => c.classList.toggle("active", c.dataset.preset === "custom"));
-  });
-});
-
-$("#seed").addEventListener("input", (e) => {
-  const v = e.target.value;
-  state.params.seed = v === "" ? null : Number(v);
-});
-
-$("#seed-random").addEventListener("click", () => {
-  const v = Math.floor(Math.random() * (2 ** 31 - 1));
-  $("#seed").value = v;
-  state.params.seed = v;
-});
-
-$("#language-transfer").addEventListener("change", (e) => {
-  state.params.language_transfer = e.target.checked;
-  $("#cfg_weight").disabled = e.target.checked;
-});
-
-// ----------- script + chunk hint -----------
-const scriptInput = $("#script-input");
-scriptInput.addEventListener("input", () => {
-  $("#char-count").textContent = scriptInput.value.length;
-  updateChunkHint();
-});
-
-function updateChunkHint() {
-  const len = scriptInput.value.length;
-  let chunks = 1;
-  if (len > 300) chunks = Math.ceil(len / 280);
-  $("#chunk-hint").textContent = chunks === 1 ? "1 chunk" : `${chunks} chunks`;
-}
-
-// ----------- generate (single) -----------
-$("#generate-btn").addEventListener("click", () => generate());
-
-document.addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-    e.preventDefault();
-    generate();
-  } else if (e.key === "?" && !inEditableField(e.target)) {
-    $("#hotkeys-modal").hidden = false;
-  } else if (!inEditableField(e.target)) {
-    if (e.key === "q" || e.key === "Q") gotoRoute("queue");
-    else if (e.key === "h" || e.key === "H") gotoRoute("history");
-    else if (e.key === "v" || e.key === "V") gotoRoute("voices");
-    else if (e.key === "b" || e.key === "B") gotoRoute("batch");
-    else if (/^[1-9]$/.test(e.key)) {
-      const idx = parseInt(e.key, 10) - 1;
-      const code = state.recentLangs[idx];
-      if (code) {
-        state.selectedLang = code;
-        renderLangChips();
-      }
+    const rows = $('#history-rows');
+    items.forEach(it => rows.appendChild(renderHistoryEntry(it)));
+    if (items.length) {
+      $('#clear-history').addEventListener('click', async () => {
+        await Promise.all(items.map(i => api(`/api/history/${i.id}`, { method: 'DELETE' }).catch(() => {})));
+        await loadHistory();
+      });
     }
   }
+}
+
+function renderVoiceCard(m) {
+  const inst = !!m.status?.installed;
+  const active = state.activeModelId === m.id;
+  const card = document.createElement('div');
+  card.className = 'voice-card' + (active ? ' active' : '') + (inst ? '' : ' uninstalled');
+  card.style.borderColor = active ? m.variant_color : '';
+  card.innerHTML = `
+    <div class="voice-card-head">
+      <span class="variant-pill" style="color:${m.variant_color}; background:${m.variant_color}22">${escapeHtml(m.variant)}</span>
+      <span class="install-tag ${inst ? 'ok' : 'no'}">${inst ? '✓ installed' : 'not installed'}</span>
+    </div>
+    <div class="voice-card-name">${escapeHtml(m.label)}</div>
+    <div class="voice-card-desc">${escapeHtml(m.desc)}</div>
+    <div class="voice-card-meta">
+      <span>${escapeHtml(m.size)}</span><span class="sep">·</span>
+      <span>${escapeHtml(m.lang)}</span><span class="sep">·</span>
+      <span>${escapeHtml(m.total_gb)}</span>
+    </div>
+    ${inst ? '' : '<div class="voice-card-cta">⬇ Download required</div>'}
+  `;
+  card.addEventListener('click', () => {
+    state.activeModelId = m.id;
+    localStorage.setItem('cb_active', m.id);
+    state.text = m.default_text || state.text;
+    state.params = { ...m.params };
+    syncTextInput();
+    renderLeft();
+    renderModelHeader();
+    renderParams();
+    renderFolderInfo();
+    renderStatusCard();
+    if (!inst) openManager(m.id);
+  });
+  return card;
+}
+
+function renderHistoryEntry(it) {
+  const m = state.models.find(x => x.id === it.model_id) || {};
+  const div = document.createElement('div');
+  div.className = 'history-entry';
+  const variant = m.variant || it.model_id || '';
+  const vc = m.variant_color || '#888';
+  div.innerHTML = `
+    <div class="history-head">
+      <span class="variant-pill" style="color:${vc}; background:${vc}22">${escapeHtml(variant)}</span>
+      <span class="history-meta" style="margin-left:auto">${(it.duration_sec ?? '-')}s</span>
+      <span class="history-meta">·</span>
+      <span class="history-meta">24kHz</span>
+      <button class="iconbtn play-h" title="Play">▶</button>
+      <button class="iconbtn dim dl-h" title="Download">↓</button>
+    </div>
+    <div class="history-snippet">${escapeHtml(it.text || '')}</div>
+    <div class="history-time">${new Date((it.finished_at || it.enqueued_at || 0) * 1000).toLocaleString()}</div>
+  `;
+  div.querySelector('.play-h').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!it.audio_url) return;
+    const a = new Audio(it.audio_url); a.play();
+  });
+  div.querySelector('.dl-h').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!it.audio_url) return;
+    const a = document.createElement('a'); a.href = it.audio_url; a.download = `chatterbox-${it.id}.wav`; a.click();
+  });
+  div.addEventListener('click', () => {
+    state.text = it.text;
+    state.activeModelId = it.model_id || state.activeModelId;
+    state.params = { ...(it.params || {}) };
+    state.leftTab = 'voices';
+    setTab('voices');
+    syncTextInput();
+    renderModelHeader();
+    renderParams();
+    renderFolderInfo();
+  });
+  return div;
+}
+
+// ─── Center: model header + tag/lang bars ──────────────────────────────────
+function renderModelHeader() {
+  const m = activeModel();
+  if (!m) return;
+  $('#mh-pill').textContent = m.variant;
+  $('#mh-pill').style.color = m.variant_color;
+  $('#mh-pill').style.background = m.variant_color + '22';
+  $('#mh-name').textContent = m.label;
+  $('#mh-desc').textContent = m.desc;
+
+  const cta = $('#mh-cta-slot');
+  cta.innerHTML = '';
+  const inst = !!m.status?.installed;
+  if (inst) {
+    const span = document.createElement('span'); span.className = 'model-ready'; span.textContent = '✓ Ready';
+    cta.appendChild(span);
+  } else {
+    const btn = document.createElement('button'); btn.className = 'btn danger'; btn.textContent = '⬇ Download model';
+    btn.addEventListener('click', () => openManager(m.id));
+    cta.appendChild(btn);
+  }
+
+  // Tags bar (Turbo / ONNX)
+  const tags = m.tags || [];
+  const tagsBar = $('#tags-bar');
+  if ((m.type === 'tts_turbo' || m.type === 'onnx') && tags.length) {
+    tagsBar.innerHTML = '<span class="subbar-label">TAGS</span>';
+    tags.forEach(t => {
+      const b = document.createElement('button');
+      b.className = 'tag-chip';
+      b.textContent = t;
+      b.addEventListener('click', () => {
+        const ta = $('#text-input');
+        ta.value = (ta.value + ' ' + t).trim();
+        state.text = ta.value;
+        updateCharCount();
+      });
+      tagsBar.appendChild(b);
+    });
+    tagsBar.classList.remove('hidden');
+  } else {
+    tagsBar.classList.add('hidden');
+  }
+
+  // Language bar (MTL)
+  const langBar = $('#lang-bar');
+  if (m.type === 'mtl_tts') {
+    const sel = $('#lang-select');
+    sel.innerHTML = '';
+    state.languages.forEach(l => {
+      const o = document.createElement('option');
+      o.value = l.code; o.textContent = `${l.name} (${l.code})`;
+      sel.appendChild(o);
+    });
+    sel.value = state.params.language_id || 'en';
+    sel.onchange = () => { state.params.language_id = sel.value; };
+    langBar.classList.remove('hidden');
+  } else {
+    langBar.classList.add('hidden');
+  }
+}
+
+// ─── Right panel: parameters ───────────────────────────────────────────────
+function renderParams() {
+  const m = activeModel(); if (!m) return;
+  const schema = PARAM_SCHEMAS[m.type] || [];
+  const host = $('#params-host');
+  host.innerHTML = '';
+  schema.forEach(sp => {
+    if (sp.type === 'toggle') host.appendChild(renderToggle(sp));
+    else host.appendChild(renderSlider(sp));
+  });
+}
+
+function renderSlider(sp) {
+  const wrap = document.createElement('div'); wrap.className = 'slider-row';
+  const cur = state.params[sp.key] ?? sp.default;
+  const pct = ((cur - sp.min) / (sp.max - sp.min)) * 100;
+  wrap.innerHTML = `
+    <div class="slider-head">
+      <span class="slider-label">${escapeHtml(sp.label)}</span>
+      <span class="slider-value" data-key="${sp.key}">${formatVal(cur, sp.step)}</span>
+    </div>
+    ${sp.hint ? `<div class="slider-hint">${escapeHtml(sp.hint)}</div>` : ''}
+    <div class="slider-track">
+      <div class="slider-fill" style="width:${pct}%"></div>
+      <input type="range" min="${sp.min}" max="${sp.max}" step="${sp.step}" value="${cur}" />
+    </div>
+  `;
+  const input = wrap.querySelector('input[type="range"]');
+  const fill = wrap.querySelector('.slider-fill');
+  const valEl = wrap.querySelector('.slider-value');
+  input.addEventListener('input', () => {
+    const v = parseFloat(input.value);
+    state.params[sp.key] = v;
+    fill.style.width = ((v - sp.min) / (sp.max - sp.min)) * 100 + '%';
+    valEl.textContent = formatVal(v, sp.step);
+  });
+  // click-to-edit value
+  valEl.addEventListener('click', () => {
+    const inputEl = document.createElement('input');
+    inputEl.className = 'slider-value-input';
+    inputEl.value = formatVal(state.params[sp.key] ?? sp.default, sp.step);
+    valEl.replaceWith(inputEl); inputEl.focus(); inputEl.select();
+    const commit = () => {
+      let v = parseFloat(inputEl.value);
+      if (!isNaN(v)) {
+        v = Math.max(sp.min, Math.min(sp.max, v));
+        state.params[sp.key] = v;
+        input.value = v;
+        fill.style.width = ((v - sp.min) / (sp.max - sp.min)) * 100 + '%';
+      }
+      const newVal = document.createElement('span');
+      newVal.className = 'slider-value';
+      newVal.dataset.key = sp.key;
+      newVal.textContent = formatVal(state.params[sp.key] ?? sp.default, sp.step);
+      newVal.addEventListener('click', valEl.onclick);
+      inputEl.replaceWith(newVal);
+      // re-bind click handler since we replaced the node
+      renderParams();
+    };
+    inputEl.addEventListener('blur', commit);
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); commit(); }
+    });
+  });
+  return wrap;
+}
+
+function renderToggle(sp) {
+  const cur = state.params[sp.key] ?? sp.default;
+  const wrap = document.createElement('div'); wrap.className = 'toggle-row';
+  wrap.innerHTML = `
+    <span class="slider-label">${escapeHtml(sp.label)}</span>
+    <div class="toggle-pill ${cur ? 'on' : ''}"></div>
+  `;
+  wrap.querySelector('.toggle-pill').addEventListener('click', e => {
+    state.params[sp.key] = !state.params[sp.key];
+    e.currentTarget.classList.toggle('on', state.params[sp.key]);
+  });
+  return wrap;
+}
+
+function formatVal(v, step) {
+  if (step >= 1) return String(parseInt(v, 10));
+  if (step >= 0.1) return v.toFixed(1);
+  return v.toFixed(2);
+}
+
+// ─── Folder + status cards ─────────────────────────────────────────────────
+function renderFolderInfo() {
+  const m = activeModel(); if (!m) return;
+  $('#folder-path').textContent = (m.local_folder || '').replace(/\/$/, '') + '/';
+  const host = $('#folder-files'); host.innerHTML = '';
+  const present = new Set(m.status?.files_present || []);
+  (m.required_files || []).forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'file' + (present.has(f) ? ' present' : '');
+    div.textContent = (present.has(f) ? '✓ ' : '· ') + f;
+    host.appendChild(div);
+  });
+  $('#folder-help').onclick = () => openManager(m.id);
+}
+
+function renderStatusCard() {
+  const m = activeModel(); if (!m) return;
+  const st = m.status || {};
+  const card = $('#status-card');
+  card.classList.toggle('ok', !!st.installed);
+  card.classList.toggle('bad', !st.installed);
+  $('#status-head').textContent = st.installed ? '✓ Model installed' : '✗ Model not found';
+  $('#status-body').innerHTML = st.installed
+    ? `Found in <code style="color:#5a7a4a">${escapeHtml(st.where_path || st.where || '')}</code>`
+    : `Place files in:<br/><code style="color:#5a3a2a">${escapeHtml(m.local_folder)}</code><br/>then click Refresh Models`;
+}
+
+// ─── Reference voice (single ad-hoc upload, design v2 pattern) ─────────────
+$('#ref-browse').addEventListener('click', () => $('#ref-file').click());
+$('#refzone').addEventListener('click', () => $('#ref-file').click());
+$('#ref-clear').addEventListener('click', e => {
+  e.stopPropagation();
+  state.refName = null; state.refFile = null;
+  setRefUI(null);
+});
+$('#ref-file').addEventListener('change', async e => {
+  const f = e.target.files?.[0]; if (!f) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  fd.append('name', f.name.replace(/\.[^.]+$/, '').slice(0, 64));
+  try {
+    const r = await api('/api/refs', { method: 'POST', body: fd });
+    state.refName = r.ref.name;
+    setRefUI(r.ref);
+    showToast(`Voice reference: ${r.ref.name}`, 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 });
 
-function inEditableField(el) {
-  if (!el) return false;
-  const tag = (el.tagName || "").toLowerCase();
-  return tag === "textarea" || tag === "input" || el.isContentEditable;
+function setRefUI(ref) {
+  const z = $('#refzone'), icon = $('#ref-icon'), name = $('#ref-name'), sub = $('#ref-sub'), browse = $('#ref-browse'), clear = $('#ref-clear');
+  if (ref) {
+    z.classList.add('has-ref');
+    icon.textContent = '🎵';
+    name.textContent = ref.name;
+    name.classList.add('has-ref');
+    sub.textContent = `Click to change · ${(ref.duration_sec || 0).toFixed(1)}s · WAV / MP3 / FLAC`;
+    browse.classList.add('hidden');
+    clear.classList.remove('hidden');
+  } else {
+    z.classList.remove('has-ref');
+    icon.textContent = '🎤';
+    name.textContent = 'Upload reference audio clip';
+    name.classList.remove('has-ref');
+    sub.textContent = '~10 seconds · WAV / MP3 / FLAC · Leave empty for default voice';
+    browse.classList.remove('hidden');
+    clear.classList.add('hidden');
+  }
 }
+
+// ─── Text input + char counter ─────────────────────────────────────────────
+const textEl = $('#text-input');
+textEl.addEventListener('input', () => {
+  state.text = textEl.value;
+  updateCharCount();
+});
+function updateCharCount() {
+  const len = state.text.length;
+  const limit = 300;
+  const el = $('#char-count');
+  el.textContent = `${len}/${limit}`;
+  el.classList.toggle('over', len > limit);
+  textEl.classList.toggle('over', len > limit);
+}
+function syncTextInput() { textEl.value = state.text; updateCharCount(); }
+
+// ─── Seed ──────────────────────────────────────────────────────────────────
+$('#seed-input').addEventListener('input', e => { state.seed = parseInt(e.target.value, 10) || 0; });
+$('#seed-die').addEventListener('click', () => {
+  state.seed = Math.floor(Math.random() * 99999);
+  $('#seed-input').value = state.seed;
+});
+
+// ─── Generate ──────────────────────────────────────────────────────────────
+$('#generate-btn').addEventListener('click', generate);
 
 async function generate() {
-  const text = scriptInput.value.trim();
-  if (!text) { toast("Type some text first", "error"); return; }
+  const m = activeModel(); if (!m) return;
+  if (!isInstalled(m.id)) { openManager(m.id); showToast(`Download ${m.label} first`, 'warn'); return; }
+  if (!state.text.trim()) { showToast('Type some text first', 'warn'); return; }
+
+  setGenButton('gen');
+  startWavAnim('gen', m.variant_color);
+  $('#output-empty').classList.add('hidden');
+  $('#output-loading').classList.remove('hidden');
+  $('#output-actions').classList.add('hidden');
+  $('#output-player').classList.add('hidden');
+  $('#output-model').textContent = m.label;
+  $('#output-device').textContent = state.device;
+
   const payload = {
-    text,
-    language_id: state.selectedLang,
-    ref_name: state.selectedRef,
-    exaggeration: state.params.exaggeration,
-    cfg_weight: state.params.cfg_weight,
-    temperature: state.params.temperature,
-    seed: state.params.seed,
-    language_transfer: state.params.language_transfer,
+    text: state.text,
+    model_id: m.id,
+    ref_name: state.refName,
+    seed: state.seed || null,
+    ...state.params,
   };
   try {
-    const data = await fetchJSON("/api/synthesize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const r = await api('/api/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    state.jobId = data.job_id;
-    showPlayerPlaceholder();
-    toast(`Queued (${data.chunks} chunk${data.chunks === 1 ? "" : "s"})`);
+    state.jobId = r.job_id;
+    showToast(`Queued · ${r.chunks} chunk${r.chunks === 1 ? '' : 's'}`, 'info');
     if (state.jobPoll) clearInterval(state.jobPoll);
     state.jobPoll = setInterval(pollJob, 800);
   } catch (e) {
-    toast(e.message, "error");
+    setGenButton('idle');
+    startWavAnim('idle', m.variant_color);
+    $('#output-loading').classList.add('hidden');
+    $('#output-empty').classList.remove('hidden');
+    showToast(e.message, 'error');
   }
 }
 
 async function pollJob() {
   if (!state.jobId) return;
   try {
-    const j = await fetchJSON(`/api/status/${state.jobId}`);
-    if (j.state === "complete") {
+    const j = await api(`/api/status/${state.jobId}`);
+    if (j.state === 'complete') {
       clearInterval(state.jobPoll); state.jobPoll = null;
-      onJobComplete(j);
-    } else if (j.state === "error") {
+      onComplete(j);
+    } else if (j.state === 'error') {
       clearInterval(state.jobPoll); state.jobPoll = null;
-      toast(j.error || "Generation failed", "error");
-      hidePlayer();
-    } else {
-      drawProgress(j.progress || 0);
+      onError(j);
     }
-  } catch (e) { /* network blip — keep polling */ }
+  } catch {}
 }
 
-function showPlayerPlaceholder() {
-  $("#player-panel").hidden = false;
-  $("#player-meta").textContent = "Generating…";
-  drawProgress(0);
+async function onComplete(j) {
+  setGenButton('idle');
+  $('#output-loading').classList.add('hidden');
+  $('#output-actions').classList.remove('hidden');
+  $('#output-stats').textContent = `✓ ${j.duration_sec}s · 24 kHz`;
+  $('#output-player').classList.remove('hidden');
+
+  const audio = $('#audio-el'); audio.src = j.audio_url + '?t=' + Date.now(); audio.load();
+  $('#dl-wav').onclick = () => {
+    const a = document.createElement('a'); a.href = j.audio_url; a.download = `chatterbox-${j.id}.wav`; a.click();
+  };
+  await drawCompleteWaveform(j.audio_url);
+  loadHistory();
+  showToast(`✓ Generated ${j.duration_sec}s of speech`, 'success');
 }
 
-function hidePlayer() {
-  $("#player-panel").hidden = true;
+function onError(j) {
+  setGenButton('idle');
+  startWavAnim('idle', activeModel()?.variant_color);
+  $('#output-loading').classList.add('hidden');
+  $('#output-empty').classList.remove('hidden');
+  showToast(j.error?.split('\n')[0] || 'Generation failed', 'error');
 }
 
-function drawProgress(p) {
-  const c = $("#waveform");
-  const ctx = c.getContext("2d");
-  const w = c.width, h = c.height;
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#1f2230";
-  for (let x = 0; x < w; x += 4) {
-    const amp = (Math.sin((x + Date.now() / 200) * 0.04) * 0.4 + 0.5) * (h * 0.6);
-    ctx.fillRect(x, h / 2 - amp / 2, 2, amp);
+function setGenButton(mode) {
+  state.wavState = mode;
+  const btn = $('#generate-btn');
+  const m = activeModel();
+  btn.classList.remove('dim', 'stop', 'disabled-state');
+  if (!m) return;
+  if (mode === 'gen') {
+    btn.textContent = '⏹ Generating…';
+    btn.classList.add('stop');
+  } else if (!isInstalled(m.id)) {
+    btn.textContent = `⬇ Download ${m.label} to Generate`;
+    btn.classList.add('dim');
+  } else {
+    btn.textContent = `${m.variant}  Generate Speech`;
   }
-  ctx.fillStyle = "rgba(124,92,255,0.7)";
-  ctx.fillRect(0, h - 4, w * p, 4);
 }
 
-async function onJobComplete(j) {
-  const c = $("#waveform");
-  const ctx = c.getContext("2d");
-  const audio = $("#player-audio");
-  audio.src = j.audio_url + "?t=" + Date.now();
-  audio.load();
-
-  await drawWaveformFromUrl(j.audio_url, ctx, c.width, c.height);
-  $("#player-meta").textContent = `${j.duration_sec || 0}s • ${j.chunk_count} chunk${j.chunk_count === 1 ? "" : "s"} • ${j.language_id}`;
-  $("#dl-btn").onclick = () => {
-    const a = document.createElement("a");
-    a.href = j.audio_url;
-    a.download = `chatterbox-${j.id}.wav`;
-    a.click();
-  };
-  $("#srt-btn").onclick = () => {
-    const srt = buildSRT(j);
-    navigator.clipboard.writeText(srt).then(() => toast("SRT copied"));
-  };
-  $("#reroll-btn").onclick = async () => {
-    try {
-      const r = await fetchJSON(`/api/history/${j.id}/reroll`, { method: "POST" });
-      state.jobId = r.job_id;
-      showPlayerPlaceholder();
-      if (state.jobPoll) clearInterval(state.jobPoll);
-      state.jobPoll = setInterval(pollJob, 800);
-    } catch (e) { toast(e.message, "error"); }
-  };
+// ─── Waveform rendering ────────────────────────────────────────────────────
+function startWavAnim(mode, color) {
+  state.wavState = mode;
+  const c = $('#waveform');
+  const ctx = c.getContext('2d');
+  const accent = color || '#c96a2e';
+  const bars = startWavAnim._bars ||= Array.from({ length: 90 }, () => ({
+    phase: Math.random() * Math.PI * 2, speed: 0.4 + Math.random(), h: 2 + Math.random() * 28,
+  }));
+  if (state.wavRaf) cancelAnimationFrame(state.wavRaf);
+  function draw(ts) {
+    const W = c.width, H = c.height, N = bars.length, bw = W / N;
+    ctx.clearRect(0, 0, W, H);
+    bars.forEach((b, i) => {
+      let h;
+      if (state.wavState === 'gen') h = 6 + Math.abs(Math.sin(ts / 350 * b.speed + b.phase)) * (H * 0.72);
+      else if (state.wavState === 'done') h = b.h * Math.sin((i / N) * Math.PI) + 2;
+      else h = 1 + Math.abs(Math.sin(ts / 2400 + b.phase)) * 4;
+      const x = i * bw + bw * 0.1, y = (H - h) / 2;
+      const a = state.wavState === 'gen' ? 0.25 + (h / H) * 0.75 : state.wavState === 'done' ? 0.82 : 0.12;
+      ctx.fillStyle = accent + Math.round(a * 255).toString(16).padStart(2, '0');
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, bw * 0.8, h, 1.5); ctx.fill(); }
+      else { ctx.fillRect(x, y, bw * 0.8, h); }
+    });
+    state.wavRaf = requestAnimationFrame(draw);
+  }
+  state.wavRaf = requestAnimationFrame(draw);
 }
 
-async function drawWaveformFromUrl(url, ctx, w, h) {
+async function drawCompleteWaveform(url) {
+  state.wavState = 'done';
   try {
     if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const arr = await fetch(url).then((r) => r.arrayBuffer());
-    const buf = await state.audioCtx.decodeAudioData(arr);
-    state.audioBuffer = buf;
-    drawWaveform(buf, ctx, w, h);
-  } catch (e) {
-    drawWaveformFlat(ctx, w, h);
-  }
-}
-
-function drawWaveform(buf, ctx, w, h) {
-  ctx.clearRect(0, 0, w, h);
-  const ch = buf.getChannelData(0);
-  const step = Math.max(1, Math.floor(ch.length / w));
-  ctx.fillStyle = "#7C5CFF";
-  for (let x = 0; x < w; x++) {
-    let min = 1, max = -1;
-    for (let i = 0; i < step; i++) {
-      const v = ch[x * step + i] || 0;
-      if (v < min) min = v;
-      if (v > max) max = v;
+    const buf = await state.audioCtx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+    const c = $('#waveform'); const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const ch = buf.getChannelData(0);
+    const step = Math.max(1, Math.floor(ch.length / W));
+    if (state.wavRaf) cancelAnimationFrame(state.wavRaf);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = activeModel()?.variant_color || '#c96a2e';
+    for (let x = 0; x < W; x++) {
+      let min = 1, max = -1;
+      for (let i = 0; i < step; i++) {
+        const v = ch[x * step + i] || 0;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const yMin = (1 + min) * 0.5 * H;
+      const yMax = (1 + max) * 0.5 * H;
+      ctx.fillRect(x, yMin, 1, Math.max(1, yMax - yMin));
     }
-    const yMin = (1 + min) * 0.5 * h;
-    const yMax = (1 + max) * 0.5 * h;
-    ctx.fillRect(x, yMin, 1, Math.max(1, yMax - yMin));
+  } catch (e) {
+    startWavAnim('done', activeModel()?.variant_color);
   }
 }
 
-function drawWaveformFlat(ctx, w, h) {
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#262936";
-  ctx.fillRect(0, h / 2 - 1, w, 2);
-}
-
-function buildSRT(j) {
-  const total = j.duration_sec || 0;
-  const chunks = j.chunk_count || 1;
-  const each = total / chunks;
-  const out = [];
-  let t = 0;
-  for (let i = 0; i < chunks; i++) {
-    out.push(`${i + 1}\n${fmtTs(t)} --> ${fmtTs(t + each)}\n[chunk ${i + 1}]\n`);
-    t += each;
-  }
-  return out.join("\n");
-}
-
-function fmtTs(sec) {
-  const ms = Math.floor((sec % 1) * 1000);
-  const s = Math.floor(sec) % 60;
-  const m = Math.floor(sec / 60) % 60;
-  const h = Math.floor(sec / 3600);
-  return `${pad(h)}:${pad(m)}:${pad(s)},${String(ms).padStart(3, "0")}`;
-}
-function pad(n) { return String(n).padStart(2, "0"); }
-
-// ----------- player controls -----------
-const audio = $("#player-audio");
-$("#play-btn").addEventListener("click", () => {
+// ─── Player ────────────────────────────────────────────────────────────────
+const audio = $('#audio-el');
+$('#play-btn').addEventListener('click', () => {
   if (audio.paused) audio.play(); else audio.pause();
 });
-audio.addEventListener("play",  () => $("#play-btn").textContent = "❚❚");
-audio.addEventListener("pause", () => $("#play-btn").textContent = "▶");
-audio.addEventListener("ended", () => $("#play-btn").textContent = "▶");
-audio.addEventListener("timeupdate", () => {
-  const t = audio.currentTime || 0;
-  const d = audio.duration || 0;
-  $("#player-time").textContent = `${fmtClock(t)} / ${fmtClock(d)}`;
-  $("#player-seek").value = d ? (t / d) * 1000 : 0;
+audio.addEventListener('play', () => $('#play-btn').textContent = '❚❚');
+audio.addEventListener('pause', () => $('#play-btn').textContent = '▶');
+audio.addEventListener('ended', () => $('#play-btn').textContent = '▶');
+audio.addEventListener('timeupdate', () => {
+  const t = audio.currentTime || 0, d = audio.duration || 0;
+  $('#time-cur').textContent = clock(t);
+  $('#time-tot').textContent = clock(d);
+  $('#seek-fill').style.width = d ? (t / d) * 100 + '%' : '0%';
 });
-$("#player-seek").addEventListener("input", (e) => {
-  if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration;
+$('#seek-track').addEventListener('click', e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  const p = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  if (audio.duration) audio.currentTime = p * audio.duration;
 });
-function fmtClock(s) {
-  const m = Math.floor(s / 60);
-  const r = Math.floor(s % 60);
-  return `${m}:${String(r).padStart(2, "0")}`;
-}
+function clock(s) { const m = Math.floor(s / 60), r = Math.floor(s % 60); return `${m}:${String(r).padStart(2, '0')}`; }
 
-// ----------- batch -----------
-function renderBatchGrid() {
-  const root = $("#batch-grid");
-  if (!root) return;
-  root.innerHTML = "";
-  state.languages.forEach((l) => {
-    const card = document.createElement("div");
-    card.className = "lg-card" + (state.batchSelected.has(l.code) ? " selected" : "");
-    card.innerHTML = `<div class="lg-name">${l.name}</div><div class="lg-code">${l.code}</div>`;
-    card.addEventListener("click", () => {
-      if (state.batchSelected.has(l.code)) state.batchSelected.delete(l.code);
-      else state.batchSelected.add(l.code);
-      renderBatchGrid();
-      $("#batch-count").textContent = state.batchSelected.size;
-    });
-    root.appendChild(card);
+// ─── Reset defaults ────────────────────────────────────────────────────────
+$('#reset-defaults').addEventListener('click', () => {
+  const m = activeModel(); if (!m) return;
+  state.params = { ...m.params };
+  renderParams();
+});
+
+// ─── Tabs (left panel) ─────────────────────────────────────────────────────
+$$('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+function setTab(name) {
+  state.leftTab = name;
+  $$('.tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === name);
+    b.setAttribute('aria-selected', b.dataset.tab === name ? 'true' : 'false');
   });
-  $("#batch-count").textContent = state.batchSelected.size;
+  if (name === 'history') loadHistory();
+  renderLeft();
 }
 
-$$("[data-batch-preset]").forEach((b) => {
-  b.addEventListener("click", () => {
-    if (b.dataset.batchPreset === "all") state.batchSelected = new Set(state.languages.map((l) => l.code));
-    else if (b.dataset.batchPreset === "eu") state.batchSelected = new Set(EU_LANGS);
-    else if (b.dataset.batchPreset === "asia") state.batchSelected = new Set(ASIA_LANGS);
-    else if (b.dataset.batchPreset === "clear") state.batchSelected.clear();
-    renderBatchGrid();
-  });
-});
-
-$("#batch-input").addEventListener("input", (e) => {
-  $("#batch-char-count").textContent = e.target.value.length;
-});
-
-$("#batch-generate-btn").addEventListener("click", async () => {
-  const text = $("#batch-input").value.trim();
-  if (!text) return toast("Type some text first", "error");
-  if (state.batchSelected.size === 0) return toast("Select at least one language", "error");
-  const payload = {
-    text,
-    language_ids: Array.from(state.batchSelected),
-    ref_name: state.selectedRef,
-    exaggeration: state.params.exaggeration,
-    cfg_weight: state.params.cfg_weight,
-    temperature: state.params.temperature,
-    seed: state.params.seed,
-    language_transfer: state.params.language_transfer,
-  };
-  try {
-    const data = await fetchJSON("/api/batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    state.batchActive = data;
-    $("#batch-progress-panel").hidden = false;
-    if (state.batchPoll) clearInterval(state.batchPoll);
-    state.batchPoll = setInterval(pollBatch, 1000);
-    pollBatch();
-    toast(`Queued ${data.job_ids.length} job${data.job_ids.length === 1 ? "" : "s"}`);
-  } catch (e) { toast(e.message, "error"); }
-});
-
-async function pollBatch() {
-  if (!state.batchActive) return;
-  const root = $("#batch-list");
-  root.innerHTML = "";
-  let allDone = true;
-  for (const id of state.batchActive.job_ids) {
-    let j;
-    try { j = await fetchJSON(`/api/status/${id}`); } catch { continue; }
-    const row = document.createElement("div");
-    row.className = "batch-row";
-    row.innerHTML = `
-      <span class="lang-tag">${j.language_id}</span>
-      <span class="snippet">${escapeHtml((j.text || "").slice(0, 80))}</span>
-      <span class="state ${j.state}">${j.state}</span>
-      <span>${j.audio_url ? `<a href="${j.audio_url}" download>Download</a>` : ""}</span>
-    `;
-    root.appendChild(row);
-    if (j.state !== "complete" && j.state !== "error" && j.state !== "cancelled") allDone = false;
-  }
-  if (allDone) {
-    clearInterval(state.batchPoll); state.batchPoll = null;
-    toast("Batch complete");
-  }
-}
-
-// ----------- history -----------
 async function loadHistory() {
-  try {
-    const data = await fetchJSON("/api/history");
-    state.history = data.entries || [];
-    renderHistory();
-  } catch (e) { toast(e.message, "error"); }
-}
-$("#history-search").addEventListener("input", () => renderHistory());
-
-function renderHistory() {
-  const root = $("#history-list");
-  const q = ($("#history-search").value || "").toLowerCase();
-  root.innerHTML = "";
-  const rows = state.history.filter((e) => !q || (e.text || "").toLowerCase().includes(q));
-  if (rows.length === 0) {
-    root.innerHTML = `<div class="hint">No history yet.</div>`;
-    return;
-  }
-  rows.forEach((e) => {
-    const row = document.createElement("div");
-    row.className = "history-row";
-    const when = e.finished_at ? new Date(e.finished_at * 1000).toLocaleString() : "";
-    row.innerHTML = `
-      <span class="lang-tag">${e.language_id}</span>
-      <span class="snippet">${escapeHtml((e.text || "").slice(0, 140))}</span>
-      <span class="when">${when}</span>
-      <span class="actions">
-        <button class="btn small ghost" data-act="play">▶</button>
-        <button class="btn small ghost" data-act="reroll">↻</button>
-        <button class="btn small ghost" data-act="load">📋</button>
-        <button class="btn small ghost" data-act="del">🗑</button>
-      </span>
-    `;
-    row.querySelector('[data-act="play"]').addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (!e.audio_url) return;
-      const a = new Audio(e.audio_url);
-      a.play();
-    });
-    row.querySelector('[data-act="reroll"]').addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      try {
-        const r = await fetchJSON(`/api/history/${e.id}/reroll`, { method: "POST" });
-        state.jobId = r.job_id;
-        gotoRoute("studio");
-        showPlayerPlaceholder();
-        if (state.jobPoll) clearInterval(state.jobPoll);
-        state.jobPoll = setInterval(pollJob, 800);
-      } catch (err) { toast(err.message, "error"); }
-    });
-    row.querySelector('[data-act="load"]').addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      scriptInput.value = e.text || "";
-      $("#char-count").textContent = scriptInput.value.length;
-      state.selectedLang = e.language_id;
-      if (!state.recentLangs.includes(e.language_id)) state.recentLangs.unshift(e.language_id);
-      if (e.params) Object.assign(state.params, e.params);
-      syncSlidersFromState();
-      state.selectedRef = e.ref_name || null;
-      renderLangChips();
-      renderVoiceCards();
-      gotoRoute("studio");
-    });
-    row.querySelector('[data-act="del"]').addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      if (!confirm("Delete this entry?")) return;
-      await fetchJSON(`/api/history/${e.id}`, { method: "DELETE" });
-      loadHistory();
-    });
-    root.appendChild(row);
-  });
+  try { const d = await api('/api/history'); state.history = d.entries || []; if (state.leftTab === 'history') renderLeft(); }
+  catch {}
 }
 
-// ----------- queue -----------
-async function refreshQueue() {
+// ─── Topbar buttons ────────────────────────────────────────────────────────
+$('#device-select').addEventListener('change', e => { state.device = e.target.value; });
+
+$('#refresh-btn').addEventListener('click', refreshModels);
+async function refreshModels() {
+  const icon = $('#refresh-icon');
+  icon.classList.add('active');
   try {
-    const data = await fetchJSON("/api/jobs");
-    fillQueueCol("#q-generating", data.generating);
-    fillQueueCol("#q-queued", data.queued);
-    fillQueueCol("#q-recent", data.recent);
-  } catch (e) { /* ignore */ }
-}
-function fillQueueCol(sel, items) {
-  const root = $(sel);
-  root.innerHTML = "";
-  if (!items || items.length === 0) {
-    root.innerHTML = `<div class="hint">—</div>`;
-    return;
+    await api('/api/models/refresh', { method: 'POST' });
+    await loadModels();
+    showToast('Models refreshed — scanning ' + (activeModel()?.local_folder || ''), 'success');
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    setTimeout(() => icon.classList.remove('active'), 600);
   }
-  items.forEach((j) => {
-    const card = document.createElement("div");
-    card.className = "queue-card";
-    const elapsed = j.started_at ? Math.round((Date.now() / 1000 - j.started_at)) : null;
-    card.innerHTML = `
-      <div class="qc-snippet">${escapeHtml((j.text || "").slice(0, 80))}</div>
-      <div class="qc-meta">
-        <span>${j.language_id} · ${j.state}</span>
-        <span>${elapsed != null ? elapsed + "s" : ""}</span>
+}
+
+$('#manager-btn').addEventListener('click', () => openManager());
+
+// ─── Manager modal ─────────────────────────────────────────────────────────
+function openManager(modelId) {
+  state.managerOpen = true;
+  state.managerModel = modelId || state.activeModelId;
+  state.managerTab = 'install';
+  $('#manager-modal').classList.remove('hidden');
+  renderManagerList();
+  renderManagerDetail();
+}
+
+function closeManager() {
+  state.managerOpen = false;
+  $('#manager-modal').classList.add('hidden');
+}
+
+$('#mm-close').addEventListener('click', closeManager);
+$('#manager-modal').addEventListener('click', e => {
+  if (e.target.id === 'manager-modal') closeManager();
+});
+$$('.mm-tab').forEach(b => b.addEventListener('click', () => {
+  state.managerTab = b.dataset.mmTab;
+  $$('.mm-tab').forEach(x => x.classList.toggle('active', x === b));
+  renderManagerDetail();
+}));
+
+function renderManagerList() {
+  const host = $('#mm-list'); host.innerHTML = '';
+  state.models.forEach(m => {
+    const inst = !!m.status?.installed;
+    const item = document.createElement('div');
+    item.className = 'mm-list-item' + (state.managerModel === m.id ? ' active' : '');
+    item.innerHTML = `
+      <div class="mm-item-row1">
+        <span class="variant-pill" style="color:${m.variant_color}; background:${m.variant_color}22">${escapeHtml(m.variant)}</span>
+        <span class="mm-item-dot ${inst ? 'ok' : 'no'}" title="${inst ? 'Installed' : 'Not installed'}"></span>
       </div>
+      <div class="mm-item-name">${escapeHtml(m.label)}</div>
+      <div class="mm-item-meta">${escapeHtml(m.size)} · ${escapeHtml(m.total_gb)}</div>
     `;
-    root.appendChild(card);
+    item.addEventListener('click', () => { state.managerModel = m.id; renderManagerList(); renderManagerDetail(); });
+    host.appendChild(item);
   });
 }
 
-// ----------- modal close -----------
-document.addEventListener("click", (e) => {
-  if (e.target.matches("[data-close-modal]")) {
-    e.target.closest(".modal").hidden = true;
-  } else if (e.target.matches(".modal")) {
-    e.target.hidden = true;
+function renderManagerDetail() {
+  const m = state.models.find(x => x.id === state.managerModel) || state.models[0];
+  if (!m) return;
+  const inst = !!m.status?.installed;
+  $('#mm-title').textContent = m.label;
+  const pill = $('#mm-pill');
+  pill.textContent = m.variant;
+  pill.style.color = m.variant_color;
+  pill.style.background = m.variant_color + '22';
+  const status = $('#mm-status');
+  status.textContent = inst ? '✓ Installed' : '○ Not installed';
+  status.classList.toggle('ok', inst);
+  status.classList.toggle('no', !inst);
+  $('#mm-desc').textContent = m.desc;
+
+  const body = $('#mm-body'); body.innerHTML = '';
+  if (state.managerTab === 'install') body.appendChild(renderInstallTab(m));
+  else if (state.managerTab === 'path') body.appendChild(renderPathTab(m));
+  else body.appendChild(renderCodeTab(m));
+}
+
+function renderInstallTab(m) {
+  const div = document.createElement('div');
+  const present = new Set(m.status?.files_present || []);
+  div.innerHTML = `
+    <div class="mm-grid">
+      <div class="mm-card opt-a">
+        <div class="head">OPTION A — Auto (recommended)</div>
+        <div class="body">Models download automatically on first <code>from_pretrained()</code> call. Just install the package and run your code.</div>
+      </div>
+      <div class="mm-card opt-b">
+        <div class="head">OPTION B — Manual (offline)</div>
+        <div class="body">Download files from HuggingFace, place them in the folder below, then refresh.</div>
+        <a class="hf-link" href="https://huggingface.co/${escapeHtml(m.hf_repo)}" target="_blank" rel="noopener">🤗 Open on HuggingFace ↗</a>
+      </div>
+    </div>
+    <div style="margin-bottom:8px"><div class="path-block label">REQUIRED FILES — place all in the model folder:</div></div>
+    <div class="files-list" id="mm-files"></div>
+  `;
+  div.querySelector('#mm-files').innerHTML = '';
+  (m.required_files || []).forEach(f => {
+    const has = present.has(f);
+    const row = document.createElement('div');
+    row.className = 'files-list-item' + (has ? ' present' : '');
+    row.innerHTML = `
+      <span style="font-size:14px">📄</span>
+      <span class="name">${escapeHtml(f)}</span>
+      <span class="kind">${f.endsWith('.onnx') ? 'onnx' : 'safetensors / pt'}</span>
+      <span class="ind ${has ? '' : 'no'}">${has ? '✓ found' : '· missing'}</span>
+    `;
+    div.querySelector('#mm-files').appendChild(row);
+  });
+  // Auto-install code snippet
+  const snip = document.createElement('div');
+  snip.style.marginTop = '14px';
+  snip.appendChild(makeSnip('pip install chatterbox-tts'));
+  div.appendChild(snip);
+  return div;
+}
+
+function renderPathTab(m) {
+  const winPath = `C:\\ChatterBox\\models\\tts\\${m.id}\\`;
+  const macPath = `~/ChatterBox/models/tts/${m.id}/`;
+  const hfPath = `~/.cache/huggingface/hub/models--${m.hf_repo.replace('/', '--')}/snapshots/main/`;
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="path-block">
+      <div class="label">WINDOWS</div>
+      <div id="p1"></div>
+    </div>
+    <div class="path-block">
+      <div class="label">macOS / LINUX</div>
+      <div id="p2"></div>
+    </div>
+    <div class="path-block">
+      <div class="label">HuggingFace CACHE (auto-download path)</div>
+      <div id="p3"></div>
+    </div>
+    <div class="tree-card">
+      <div class="head">📁 Expected folder structure</div>
+      <pre>ChatterBox/
+└── models/
+    └── tts/
+        └── ${escapeHtml(m.id)}/
+${(m.required_files || []).map(f => `            ├── ${escapeHtml(f)}`).join('\n')}</pre>
+      <div class="foot">
+        💡 After placing files, click <strong style="color:var(--muted)">Refresh Models</strong> in the top bar or press <kbd>R</kbd>
+      </div>
+    </div>
+    <div class="env-card">
+      <div class="head">🔗 Custom path via env var</div>
+      <div id="p4"></div>
+    </div>
+  `;
+  div.querySelector('#p1').appendChild(makeSnip(winPath));
+  div.querySelector('#p2').appendChild(makeSnip(macPath));
+  div.querySelector('#p3').appendChild(makeSnip(hfPath));
+  div.querySelector('#p4').appendChild(makeSnip(`# Set BEFORE importing chatterbox\nimport os\nos.environ["HF_HOME"] = "/your/custom/path"\nos.environ["CHATTERBOX_MODELS_DIR"] = "/your/models"`));
+  return div;
+}
+
+function renderCodeTab(m) {
+  let snippet;
+  if (m.type === 'tts_turbo') {
+    snippet = `from chatterbox.tts_turbo import ChatterboxTurboTTS
+import torchaudio as ta
+
+model = ChatterboxTurboTTS.from_pretrained(device="cuda")
+
+text = "Hi there [chuckle], have you got a minute?"
+wav = model.generate(text, audio_prompt_path="ref.wav")
+ta.save("output.wav", wav, model.sr)`;
+  } else if (m.type === 'tts') {
+    snippet = `from chatterbox.tts import ChatterboxTTS
+import torchaudio as ta
+
+model = ChatterboxTTS.from_pretrained(device="cuda")
+
+wav = model.generate(
+    "Your text here",
+    exaggeration=0.7,
+    cfg_weight=0.3,
+    audio_prompt_path="voice_ref.wav",
+)
+ta.save("output.wav", wav, model.sr)`;
+  } else if (m.type === 'mtl_tts') {
+    snippet = `from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+import torchaudio as ta
+
+model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+
+# French
+wav = model.generate(
+    "Bonjour, comment ça va?",
+    language_id="fr",
+    audio_prompt_path="french_ref.wav",
+)
+ta.save("output_fr.wav", wav, model.sr)`;
+  } else {
+    snippet = `# ONNX — no PyTorch needed
+from huggingface_hub import hf_hub_download
+import onnxruntime
+
+model_path = hf_hub_download("${m.hf_repo}", "t3_turbo_fp32.onnx")
+session = onnxruntime.InferenceSession(model_path)`;
+  }
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="path-block label">QUICK START</div>
+    <div id="c1"></div>
+    <div class="path-block label" style="margin-top:14px">USE THIS STUDIO FROM CLI</div>
+    <div id="c2"></div>
+  `;
+  div.querySelector('#c1').appendChild(makeSnip(snippet));
+  div.querySelector('#c2').appendChild(makeSnip(`# Drop required files into:\n${m.local_folder}\n# Then start the studio (auto-rescan on R):\npython chatterbox_app.py --auto-launch`));
+  return div;
+}
+
+function makeSnip(text) {
+  const wrap = document.createElement('div'); wrap.className = 'snip';
+  wrap.innerHTML = `<pre></pre><button class="copy">copy</button>`;
+  wrap.querySelector('pre').textContent = text;
+  const copy = wrap.querySelector('.copy');
+  copy.addEventListener('click', () => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    copy.textContent = '✓ copied';
+    copy.classList.add('copied');
+    setTimeout(() => { copy.textContent = 'copy'; copy.classList.remove('copied'); }, 1500);
+  });
+  return wrap;
+}
+
+// ─── Hotkeys (ComfyUI-style) ───────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); generate(); return; }
+  if (inEditable(e.target)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'r') refreshModels();
+  else if (k === 'm') openManager();
+  else if (k === 'escape' && state.managerOpen) closeManager();
+  else if (/^[1-9]$/.test(k)) {
+    const idx = parseInt(k, 10) - 1;
+    const m = state.models[idx];
+    if (m) {
+      state.activeModelId = m.id;
+      localStorage.setItem('cb_active', m.id);
+      state.params = { ...m.params };
+      state.text = m.default_text || state.text;
+      syncTextInput();
+      renderLeft(); renderModelHeader(); renderParams(); renderFolderInfo(); renderStatusCard();
+    }
   }
 });
-
-$("#hotkeys-btn").addEventListener("click", () => $("#hotkeys-modal").hidden = false);
-
-// ----------- helpers -----------
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
+function inEditable(el) {
+  if (!el) return false;
+  const tag = (el.tagName || '').toLowerCase();
+  return tag === 'textarea' || tag === 'input' || el.isContentEditable;
 }
 
-// ----------- boot -----------
+// ─── Boot ──────────────────────────────────────────────────────────────────
 async function boot() {
-  syncSlidersFromState();
-  await Promise.all([loadLanguages(), loadRefs()]);
-  pollStatus();
-  state.statusPoll = setInterval(pollStatus, 2000);
-  setInterval(() => {
-    const route = $$(".route").find((r) => !r.hidden)?.dataset.route;
-    if (route === "queue") refreshQueue();
-  }, 1500);
+  // language list (shared)
+  try { const l = await api('/api/languages'); state.languages = l.languages; } catch { state.languages = []; }
+  await loadModels();
+  await loadHistory();
+  await refreshTopStatus();
+
+  // initial state from active model
+  const m = activeModel();
+  if (m) {
+    if (!state.text) state.text = m.default_text || '';
+    state.params = { ...m.params };
+    syncTextInput();
+    renderModelHeader(); renderParams(); renderFolderInfo(); renderStatusCard();
+  }
+
+  startWavAnim('idle', m?.variant_color);
+  setGenButton('idle');
+
+  // background polling
+  state.statusPoll = setInterval(refreshTopStatus, 2500);
 }
 boot();

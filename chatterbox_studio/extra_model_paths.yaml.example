@@ -1,0 +1,27 @@
+# Optional: ComfyUI-style external model search paths.
+# Copy this to one of:
+#   ./extra_model_paths.yaml                 (project root, highest priority)
+#   ./chatterbox_studio/extra_model_paths.yaml
+#   ~/.config/chatterbox/extra_model_paths.yaml
+#
+# After editing, click "⟳ Refresh Models" in the studio top bar (or press R)
+# to rescan. No restart required.
+
+chatterbox:
+  base_path: ~/ChatterBox
+  is_default: true
+  # Each model id (chatterbox-turbo, chatterbox, chatterbox-multilingual,
+  # chatterbox-turbo-onnx) is appended to the path below.
+  # Example: with `tts: models/tts/`, the studio looks for required files in
+  #   ~/ChatterBox/models/tts/chatterbox-turbo/t3_turbo.safetensors
+  tts: models/tts/
+
+# Multiple roots can be combined newline-separated under one key:
+# tts: |
+#   models/tts/
+#   /mnt/nvme/chatterbox-models/
+
+# Mirror an existing ComfyUI install (the studio will pick up matching files):
+# comfyui:
+#   base_path: ~/ComfyUI
+#   tts: models/tts/

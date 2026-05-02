@@ -9,7 +9,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from . import tts_engine, chunker, history
 
@@ -22,7 +22,7 @@ OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 class Job:
     id: str
     text: str
-    language_id: str
+    model_id: str
     params: Dict[str, Any]
     ref_path: Optional[str] = None
     ref_name: Optional[str] = None
@@ -38,10 +38,15 @@ class Job:
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
 
+    @property
+    def language_id(self) -> str:
+        return str(self.params.get("language_id", "en"))
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "text": self.text,
+            "model_id": self.model_id,
             "language_id": self.language_id,
             "params": self.params,
             "ref_name": self.ref_name,
@@ -81,14 +86,13 @@ def _refresh_positions() -> None:
     with _jobs_lock:
         position = 1
         for j in list(_q.queue):
-            j.progress = 0.0
             j.params["queue_position"] = position
             position += 1
 
 
 def enqueue(
     text: str,
-    language_id: str,
+    model_id: str,
     params: Dict[str, Any],
     ref_path: Optional[str] = None,
     ref_name: Optional[str] = None,
@@ -98,7 +102,7 @@ def enqueue(
     job = Job(
         id=uuid.uuid4().hex[:12],
         text=text,
-        language_id=language_id,
+        model_id=model_id,
         params=dict(params),
         ref_path=ref_path,
         ref_name=ref_name,
@@ -187,15 +191,14 @@ def _run_job(job: Job) -> None:
 
     wavs = []
     sr = 24000
+    seed = job.params.get("seed")
     for i, chunk_text in enumerate(chunks):
         wav, sr = tts_engine.synthesize(
-            chunk_text,
-            language_id=job.language_id,
+            model_id=job.model_id,
+            text=chunk_text,
             ref_path=job.ref_path,
-            exaggeration=float(job.params.get("exaggeration", 0.5)),
-            cfg_weight=float(job.params.get("cfg_weight", 0.5)),
-            temperature=float(job.params.get("temperature", 0.8)),
-            seed=job.params.get("seed"),
+            params=job.params,
+            seed=seed,
         )
         wavs.append(wav)
         job.progress = 0.05 + 0.9 * (i + 1) / len(chunks)

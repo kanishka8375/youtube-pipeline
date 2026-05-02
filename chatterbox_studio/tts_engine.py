@@ -1,4 +1,8 @@
-"""Wrapper around ChatterboxMultilingualTTS with lazy load and ref-voice caching."""
+"""Multi-model wrapper around the three Chatterbox model types.
+
+Lazy-loads exactly one model class per `model_id`, with SHA-256-keyed
+caching of reference voice conditionals so repeat refs skip the encoder.
+"""
 
 from __future__ import annotations
 
@@ -8,18 +12,22 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
+from . import models_registry as registry
 
-_model = None
+
+_models: dict = {}
 _model_lock = threading.Lock()
-_load_state = {"status": "idle", "error": None}
+_load_state: dict = {}  # model_id -> {status, error}
 
 _REF_CACHE: "OrderedDict[str, object]" = OrderedDict()
 _REF_CACHE_MAX = 16
 _ref_lock = threading.Lock()
 
 
-def get_load_state() -> dict:
-    return dict(_load_state)
+def get_load_state(model_id: Optional[str] = None) -> dict:
+    if model_id is None:
+        return {k: dict(v) for k, v in _load_state.items()}
+    return dict(_load_state.get(model_id, {"status": "idle", "error": None}))
 
 
 def _select_device() -> str:
@@ -54,55 +62,66 @@ def get_device_info() -> dict:
     return info
 
 
-def get_model():
-    global _model
-    if _model is not None:
-        return _model
+def get_model(model_id: str, device: Optional[str] = None):
+    if model_id in _models:
+        return _models[model_id]
+    entry = registry.find_by_id(model_id)
+    if entry is None:
+        raise ValueError(f"unknown model_id {model_id}")
+    if not entry.import_mod or not entry.import_class:
+        raise RuntimeError(f"model {model_id} has no Python loader (ONNX-only)")
     with _model_lock:
-        if _model is not None:
-            return _model
-        _load_state["status"] = "loading"
-        _load_state["error"] = None
+        if model_id in _models:
+            return _models[model_id]
+        _load_state[model_id] = {"status": "loading", "error": None}
         try:
-            from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-
-            device = _select_device()
-            _model = ChatterboxMultilingualTTS.from_pretrained(device=device)
-            _load_state["status"] = "ready"
+            import importlib
+            mod = importlib.import_module(entry.import_mod)
+            cls = getattr(mod, entry.import_class)
+            dev = device or _select_device()
+            m = cls.from_pretrained(device=dev)
+            _models[model_id] = m
+            _load_state[model_id] = {"status": "ready", "error": None}
+            return m
         except Exception as e:
-            _load_state["status"] = "error"
-            _load_state["error"] = str(e)
+            _load_state[model_id] = {"status": "error", "error": str(e)}
             raise
-        return _model
 
 
-def warm_up_async() -> None:
-    """Kick off model loading on a background thread (non-blocking)."""
-    if _load_state["status"] in ("loading", "ready"):
+def warm_up_async(model_id: str) -> None:
+    if _load_state.get(model_id, {}).get("status") in ("loading", "ready"):
         return
 
     def _run():
         try:
-            get_model()
+            get_model(model_id)
         except Exception:
             pass
 
-    threading.Thread(target=_run, daemon=True, name="chatterbox-warmup").start()
+    threading.Thread(target=_run, daemon=True, name=f"chatterbox-warm-{model_id}").start()
 
 
-def get_supported_languages() -> dict:
+def unload(model_id: Optional[str] = None) -> dict:
+    """Drop loaded model(s) and free VRAM. Returns counts."""
+    with _model_lock:
+        ids = [model_id] if model_id else list(_models.keys())
+        n = 0
+        for mid in ids:
+            if mid in _models:
+                _models.pop(mid, None)
+                _load_state[mid] = {"status": "idle", "error": None}
+                n += 1
+        with _ref_lock:
+            cleared = len(_REF_CACHE)
+            _REF_CACHE.clear()
     try:
-        from chatterbox.mtl_tts import SUPPORTED_LANGUAGES
-        return dict(SUPPORTED_LANGUAGES)
+        import gc, torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     except Exception:
-        return {
-            "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek",
-            "en": "English", "es": "Spanish", "fi": "Finnish", "fr": "French",
-            "he": "Hebrew", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
-            "ko": "Korean", "ms": "Malay", "nl": "Dutch", "no": "Norwegian",
-            "pl": "Polish", "pt": "Portuguese", "ru": "Russian", "sv": "Swedish",
-            "sw": "Swahili", "tr": "Turkish", "zh": "Chinese",
-        }
+        pass
+    return {"models_unloaded": n, "ref_cache_cleared": cleared}
 
 
 def sha256_file(path: str | Path) -> str:
@@ -130,20 +149,23 @@ def _cache_put(key: str, value) -> None:
 
 
 def synthesize(
+    model_id: str,
     text: str,
-    language_id: str,
     ref_path: Optional[str] = None,
-    exaggeration: float = 0.5,
-    cfg_weight: float = 0.5,
-    temperature: float = 0.8,
+    params: Optional[dict] = None,
     seed: Optional[int] = None,
 ):
-    """Run a single synthesis. Returns (wav_tensor_cpu, sample_rate)."""
+    """Run a single synthesis on the chosen model. Returns (wav_cpu, sr)."""
     import torch
 
-    model = get_model()
+    entry = registry.find_by_id(model_id)
+    if entry is None:
+        raise ValueError(f"unknown model_id {model_id}")
 
-    if seed is not None:
+    model = get_model(model_id)
+    params = dict(params or {})
+
+    if seed is not None and int(seed) > 0:
         torch.manual_seed(int(seed))
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(int(seed))
@@ -153,26 +175,43 @@ def synthesize(
         key = sha256_file(ref_path)
         cached = _cache_get(key)
         if cached is None:
-            model.prepare_conditionals(ref_path, exaggeration=exaggeration)
             try:
-                _cache_put(key, model.conds)
-            except AttributeError:
+                model.prepare_conditionals(ref_path, exaggeration=float(params.get("exaggeration", 0.5)))
+                _cache_put(key, getattr(model, "conds", None))
+            except Exception:
                 pass
         else:
             cache_hit = True
             try:
                 model.conds = cached
-            except AttributeError:
-                model.prepare_conditionals(ref_path, exaggeration=exaggeration)
+            except Exception:
+                cache_hit = False
 
-    wav = model.generate(
-        text,
-        language_id=language_id,
-        audio_prompt_path=ref_path if not cache_hit else None,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-        temperature=temperature,
-    )
+    gen_kwargs = {}
+    if entry.type == "tts_turbo":
+        gen_kwargs = {
+            k: params[k]
+            for k in ("temperature", "top_p", "top_k", "repetition_penalty", "min_p")
+            if k in params
+        }
+    elif entry.type == "tts":
+        gen_kwargs = {
+            k: params[k]
+            for k in ("exaggeration", "cfg_weight", "temperature", "min_p", "top_p", "repetition_penalty")
+            if k in params
+        }
+    elif entry.type == "mtl_tts":
+        gen_kwargs = {
+            k: params[k]
+            for k in ("exaggeration", "cfg_weight", "temperature")
+            if k in params
+        }
+        gen_kwargs["language_id"] = params.get("language_id", "en")
+
+    if not cache_hit and ref_path:
+        gen_kwargs["audio_prompt_path"] = ref_path
+
+    wav = model.generate(text, **gen_kwargs)
 
     if hasattr(wav, "detach"):
         wav = wav.detach().to("cpu")
