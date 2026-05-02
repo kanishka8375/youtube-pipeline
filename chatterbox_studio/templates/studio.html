@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatterBox Studio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/studio.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ═══ Top bar ═══ -->
+    <div class="topbar">
+      <div class="brand">Chatter<b>BOx</b><span class="brand-sub">Studio</span></div>
+
+      <div class="topbar-control" style="margin-left:24px">
+        <span class="dot" id="device-dot"></span>
+        <select id="device-select">
+          <option value="cuda">cuda</option>
+          <option value="cuda:0">cuda:0</option>
+          <option value="cuda:1">cuda:1</option>
+          <option value="mps">mps</option>
+          <option value="cpu">cpu</option>
+        </select>
+      </div>
+
+      <button class="topbar-control" id="refresh-btn" title="Rescan model folders (R)">
+        <span class="spin" id="refresh-icon">⟳</span>
+        Refresh Models
+      </button>
+
+      <button class="topbar-control accent" id="manager-btn" title="Open Model Manager (M)">
+        📦 Model Manager
+      </button>
+
+      <div class="topbar-spacer"></div>
+
+      <a class="topbar-link" href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noopener">GitHub ↗</a>
+      <a class="topbar-link" href="https://huggingface.co/ResembleAI" target="_blank" rel="noopener">HuggingFace ↗</a>
+    </div>
+
+    <div class="main">
+
+      <!-- ═══ Left: Voices / History ═══ -->
+      <div class="left">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="voices" role="tab" aria-selected="true">Voices</button>
+          <button class="tab" data-tab="history" role="tab" aria-selected="false">History</button>
+        </div>
+        <div class="scroll" id="left-body">
+          <!-- Voices and history are rendered by JS into this container. -->
+        </div>
+      </div>
+
+      <!-- ═══ Center: Generation ═══ -->
+      <div class="center">
+
+        <div class="model-header" id="model-header">
+          <span class="variant-pill" id="mh-pill">Standard</span>
+          <span class="model-header-name" id="mh-name">Chatterbox</span>
+          <span class="model-header-sep">·</span>
+          <span class="model-header-desc" id="mh-desc"></span>
+          <span id="mh-cta-slot" style="margin-left:auto;"></span>
+        </div>
+
+        <!-- Conditional bars: tags (Turbo) and language (MTL) -->
+        <div class="subbar hidden" id="tags-bar"></div>
+        <div class="subbar hidden" id="lang-bar">
+          <span class="subbar-label">LANGUAGE</span>
+          <select class="lang-select" id="lang-select"></select>
+          <span class="lang-hint">Set CFG → 0 for cross-language accent transfer</span>
+        </div>
+
+        <div class="workspace">
+
+          <!-- Text -->
+          <div class="section">
+            <div class="row-head">
+              <span class="field-label">Text to Synthesize</span>
+              <span class="field-meta" id="char-count">0/300</span>
+            </div>
+            <textarea class="text-input" id="text-input" rows="6"
+              placeholder="Enter your text here…"></textarea>
+          </div>
+
+          <!-- Reference voice -->
+          <div class="section">
+            <div class="row-head">
+              <span class="field-label">Reference Voice</span>
+              <span class="field-meta">Optional · 5–10 s clip</span>
+            </div>
+            <div class="refzone" id="refzone">
+              <div class="refzone-icon" id="ref-icon">🎤</div>
+              <div style="flex:1; min-width:0">
+                <div class="refzone-name" id="ref-name">Upload reference audio clip</div>
+                <div class="refzone-sub" id="ref-sub">~10 seconds · WAV / MP3 / FLAC · Leave empty for default voice</div>
+              </div>
+              <span class="refzone-browse" id="ref-browse">Browse</span>
+              <button class="iconbtn dim hidden" id="ref-clear" title="Clear">×</button>
+            </div>
+            <input type="file" id="ref-file" class="hidden" accept="audio/*" />
+          </div>
+
+          <!-- Output / waveform -->
+          <div class="output-card">
+            <div class="output-head">
+              <span class="field-label">Output</span>
+              <div id="output-actions" class="hidden">
+                <span class="output-stats" id="output-stats"></span>
+                <button class="btn" id="dl-wav" style="margin-left:8px">↓ wav</button>
+              </div>
+            </div>
+            <canvas class="waveform" id="waveform" width="900" height="64"></canvas>
+            <div class="output-empty" id="output-empty">Generate speech to see output waveform</div>
+            <div class="output-loading hidden" id="output-loading">Generating with <b id="output-model"></b> on <span class="kbd" id="output-device"></span>…</div>
+            <div class="output-player hidden" id="output-player">
+              <button class="play-btn" id="play-btn">▶</button>
+              <div class="seek-row">
+                <div class="seek-track" id="seek-track"><div class="seek-fill" id="seek-fill"></div></div>
+                <div class="seek-time"><span id="time-cur">0:00</span><span id="time-tot">0:00</span></div>
+              </div>
+            </div>
+            <audio id="audio-el" preload="auto" class="hidden"></audio>
+          </div>
+
+          <!-- Seed -->
+          <div class="seed-row">
+            <span class="label">Seed</span>
+            <input type="number" class="seed-input" id="seed-input" value="0" min="0" />
+            <button class="seed-die" id="seed-die" title="Random seed">🎲</button>
+            <span class="lang-hint">0 = random</span>
+          </div>
+
+          <!-- Generate -->
+          <button class="generate-btn" id="generate-btn">▸ Generate Speech</button>
+        </div>
+      </div>
+
+      <!-- ═══ Right: Parameters ═══ -->
+      <div class="right">
+        <div class="params-head">Parameters</div>
+        <div class="params-body">
+          <div id="params-host"></div>
+          <button class="reset-defaults" id="reset-defaults">Reset defaults</button>
+
+          <!-- Model folder card -->
+          <div class="folder-card">
+            <div class="label">📁 Model folder</div>
+            <code id="folder-path"></code>
+            <div class="files-label">Files needed:</div>
+            <div id="folder-files"></div>
+            <button class="download-link" id="folder-help">Download guide ↗</button>
+          </div>
+
+          <!-- Install status card -->
+          <div class="status-card" id="status-card">
+            <div class="head" id="status-head"></div>
+            <div class="body" id="status-body"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Toast ═══ -->
+    <div class="toast hidden" id="toast"></div>
+
+    <!-- ═══ Model Manager modal ═══ -->
+    <div class="modal-bg hidden" id="manager-modal">
+      <div class="modal-card">
+        <div class="mm-list">
+          <div class="mm-list-head">Model Manager</div>
+          <div class="mm-list-body" id="mm-list"></div>
+          <div class="mm-list-foot">Press <kbd>R</kbd> to refresh after adding files</div>
+        </div>
+        <div class="mm-detail">
+          <div class="mm-detail-head">
+            <div class="mm-detail-info">
+              <div class="mm-title-row">
+                <span class="mm-title" id="mm-title"></span>
+                <span class="variant-pill" id="mm-pill"></span>
+                <span class="mm-status" id="mm-status"></span>
+              </div>
+              <div class="mm-desc" id="mm-desc"></div>
+            </div>
+            <button class="iconbtn dim mm-close" id="mm-close">×</button>
+          </div>
+          <div class="mm-tabs">
+            <button class="mm-tab active" data-mm-tab="install">📥 How to Install</button>
+            <button class="mm-tab" data-mm-tab="path">📁 Folder Path</button>
+            <button class="mm-tab" data-mm-tab="code">💻 Python Code</button>
+          </div>
+          <div class="mm-body" id="mm-body"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <script src="/static/studio.js" defer></script>
+</body>
+</html>
